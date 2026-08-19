@@ -725,7 +725,7 @@ class Weapon {
     // 不要求指针锁定也能射击（无法锁定时仍可瞄准屏幕中心开火）
     var canShoot = game.state === 'playing';
     this.firing = canShoot && game.input.mouseLeft;
-    // 冲刺/闪避/滑铲中开火 → 立即解除动作（不锁枪，防软锁）
+    // 冲刺中开火 → 立即解除冲刺（不锁枪，防软锁）
     if (this.firing) game.player.cancelMoveAction();
 
     // 换弹计时
