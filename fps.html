@@ -22,10 +22,41 @@
     color: #cfe9ff; font-size: 14px; margin: 3px 0; letter-spacing: .5px; }
   .row .lbl { opacity: .85; }
   .row .val { font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+  #hpWrap { position: relative; margin: 5px 0 9px; }
   #hpBarWrap { height: 14px; background: rgba(255,255,255,.12); border-radius: 7px;
-    overflow: hidden; margin: 5px 0 9px; }
+    overflow: hidden; }
+  #hpBarWrap.glow { box-shadow: 0 0 10px rgba(80,255,140,.55); }
+  #healFloat { position: absolute; right: 0; top: -15px; color: #7dff9a; font-size: 13px;
+    font-weight: 700; opacity: 0; transition: opacity .4s; text-shadow: 0 0 6px rgba(80,255,140,.6); }
+  #healFloat.show { opacity: 1; }
   #hpBar { height: 100%; width: 100%; background: linear-gradient(90deg,#2fbf4f,#7dff9a);
     border-radius: 7px; transition: width .12s linear; }
+  /* 耐力条（HP 条下方） */
+  #staminaRow { display: flex; align-items: center; gap: 8px; margin: -4px 0 4px; }
+  #staminaBarWrap { flex: 1; height: 8px; background: rgba(255,255,255,.1); border-radius: 4px; overflow: hidden; }
+  #staminaBar { height: 100%; width: 100%; background: linear-gradient(90deg,#1fa8d8,#6fe3ff);
+    border-radius: 4px; transition: width .1s linear; }
+  #staminaBar.low { background: linear-gradient(90deg,#d43a2f,#ff7a5e); animation: stamFlash .5s infinite alternate; }
+  #staminaText { min-width: 30px; text-align: right; color: #6fe3ff; font-size: 11px;
+    font-variant-numeric: tabular-nums; }
+  #staminaText.low { color: #ff7a5e; }
+  @keyframes stamFlash { from { opacity: .55; } to { opacity: 1; } }
+
+  /* 受击方向指示器（屏幕边缘红色弧形，指向伤害来源） */
+  #dmgDir { position: fixed; left: 50%; top: 50%; width: 0; height: 0; z-index: 44;
+    pointer-events: none; opacity: 0; transition: opacity .12s; }
+  #dmgDir.show { opacity: 1; }
+  #dmgDir .arc { position: absolute; width: 64px; height: 64px; left: -32px; top: calc(-32px - 34vmin);
+    border-radius: 50%; border: 3px solid transparent; border-top-color: #ff4136;
+    filter: drop-shadow(0 0 6px rgba(255,70,60,.85)); }
+
+  /* 暂停界面：灵敏度调节 */
+  .sensRow { display: flex; align-items: center; gap: 14px; margin: 6px 0 26px; color: #cfe9ff; font-size: 15px; }
+  .sensRow .sensBtn { width: 42px; height: 34px; font-size: 20px; font-weight: 700; color: #141a26;
+    background: linear-gradient(180deg,#ffd97a,#ff9a3d); border: none; border-radius: 8px; cursor: pointer; }
+  .sensRow .sensBtn:hover { transform: scale(1.06); }
+  .sensRow #sensVal { min-width: 54px; text-align: center; font-weight: 700; color: #ffd94a;
+    font-variant-numeric: tabular-nums; }
   #ammoText { min-width: 74px; text-align: right; }
   #ammoText.reloading { color: #ffb84d; }
 
@@ -123,8 +154,15 @@
 <div id="hud" class="hidden">
   <div id="topleft">
     <div class="panel">
-      <div class="row"><span class="lbl">生命值</span><span class="val" id="hpText">100</span></div>
-      <div id="hpBarWrap"><div id="hpBar"></div></div>
+      <div id="hpWrap">
+        <div class="row"><span class="lbl">生命值</span><span class="val" id="hpText">100</span></div>
+        <div id="hpBarWrap"><div id="hpBar"></div></div>
+        <div id="healFloat">+6</div>
+      </div>
+      <div id="staminaRow">
+        <div id="staminaBarWrap"><div id="staminaBar" style="width:100%"></div></div>
+        <span id="staminaText">100</span>
+      </div>
       <div class="row"><span class="lbl">弹药</span><span class="val" id="ammoText">30 / 150</span></div>
       <div class="row"><span class="lbl">分数</span><span class="val" id="scoreText">0</span></div>
       <div class="row"><span class="lbl">波次</span><span class="val" id="waveText">1</span></div>
@@ -138,11 +176,12 @@
   <div id="hitmarker"><span class="h1"></span><span class="h2"></span><span class="h3"></span><span class="h4"></span></div>
   <div id="wavebanner"></div>
   <div id="toast"></div>
-  <div id="hint">WASD 移动 · 空格 跳跃 · Shift 加速 · 左键 射击 · 右键 瞄准 · R 换弹 · M 静音 · 方向键 转视角(备用) · Esc 暂停</div>
+  <div id="hint">WASD 移动 · 空格 跳跃 · Shift 冲刺 · C 蹲伏 · 冲刺中C 滑铲 · 双击WASD 闪避 · 左键 射击 · 右键 瞄准 · R 换弹 · M 静音 · Esc 暂停</div>
   <div id="diag"></div>
 </div>
 <div id="damageOverlay"></div>
 <div id="hitFlash"></div>
+<div id="dmgDir"><div class="arc"></div></div>
 
 <!-- 开始界面 -->
 <div id="startScreen" class="screen">
@@ -153,8 +192,11 @@
     <li><b>鼠标</b> 视角</li>
     <li><b>左键</b> 射击（按住连发）</li>
     <li><b>右键</b> 瞄准</li>
-    <li><b>空格</b> 跳跃</li>
-    <li><b>Shift</b> 加速跑</li>
+    <li><b>空格</b> 跳跃（轻点小跳）</li>
+    <li><b>Shift</b> 加速跑（消耗耐力）</li>
+    <li><b>C</b> 蹲伏（可躲射手弹道）</li>
+    <li><b>双击 WASD</b> 闪避冲刺</li>
+    <li><b>冲刺中 C</b> 滑铲</li>
     <li><b>R</b> 换弹</li>
     <li><b>M</b> 声音开关</li>
     <li><b>方向键</b> 转视角（备用）</li>
@@ -166,6 +208,12 @@
 <!-- 暂停界面 -->
 <div id="pauseScreen" class="screen hidden">
   <h1>已暂停</h1>
+  <div class="sensRow">
+    <span>鼠标灵敏度</span>
+    <button id="sensMinus" class="sensBtn">−</button>
+    <span id="sensVal">2.1</span>
+    <button id="sensPlus" class="sensBtn">+</button>
+  </div>
   <button id="resumeBtn" class="btn">点击继续</button>
   <p class="tip">鼠标已解锁，点击按钮重新锁定</p>
 </div>
@@ -458,13 +506,15 @@ class Input {
   constructor() {
     this.keys = new Set();       // 持续按下的键
     this.justPressed = new Set();// 本帧刚按下的键（边沿触发）
+    this.justReleased = new Set();// 本帧刚松开的键（边沿触发）
     this.mouseLeft = false;
     this.mouseRight = false;
+    this.pressTime = {};         // 每个键最近一次按下时间（ms，用于双击判定）
   }
-  press(c) { if (!this.keys.has(c)) this.justPressed.add(c); this.keys.add(c); }
-  release(c) { this.keys.delete(c); }
+  press(c) { if (!this.keys.has(c)) this.justPressed.add(c); this.keys.add(c); this.pressTime[c] = performance.now(); }
+  release(c) { if (this.keys.has(c)) this.justReleased.add(c); this.keys.delete(c); }
   has(c) { return this.keys.has(c); }
-  clearPressed() { this.justPressed.clear(); }
+  clearPressed() { this.justPressed.clear(); this.justReleased.clear(); }
 }
 
 /* ======================= 子弹对象池 ======================= */
@@ -678,6 +728,8 @@ class Weapon {
     // 不要求指针锁定也能射击（无法锁定时仍可瞄准屏幕中心开火）
     var canShoot = game.state === 'playing';
     this.firing = canShoot && game.input.mouseLeft;
+    // 冲刺/闪避/滑铲中开火 → 立即解除动作（不锁枪，防软锁）
+    if (this.firing) game.player.cancelMoveAction();
 
     // 换弹计时
     if (this.reloading) {
@@ -699,9 +751,11 @@ class Weapon {
     // 瞄准程度
     this.aimFrac += ((game.input.mouseRight ? 1 : 0) - this.aimFrac) * (1 - Math.exp(-10 * dt));
 
-    // 准星扩散：随移动速度与连发热量增大，瞄准时缩小
+    // 准星扩散：随移动速度与连发热量增大，瞄准时缩小；蹲伏更稳、空中更散
     var speedF = Math.min(1, game.player.hSpeed / 10);
     var target = this.baseSpread + speedF * 0.014 + Math.min(this.fireHeat, 12) * 0.0006;
+    if (game.player.crouching) target *= PlayerConfig.CROUCH_SPREAD_MULT;
+    if (!game.player.onGround) target += PlayerConfig.AIR_SPREAD_PENALTY;
     target *= 1 - 0.62 * this.aimFrac;
     this.spread += (target - this.spread) * (1 - Math.exp(-9 * dt));
     this.fireHeat *= Math.exp(-2.4 * dt);
@@ -1117,11 +1171,14 @@ class EnemyShotPool {
       b.pos.addScaledVector(b.dir, seg);
       b.life -= dt;
       if (b.life <= 0) { this.recycle(b, i); continue; }
-      // 命中玩家（球形判定）
+      // 命中玩家（水平球形 + 竖直按眼睛高度判定：蹲伏可躲弹道）
       var pp = game.player.pos;
-      var ddx = pp.x - b.pos.x, ddz = pp.z - b.pos.z, ddy = pp.y - b.pos.y;
-      if (ddx * ddx + ddz * ddz < 0.55 * 0.55 && Math.abs(ddy) < 1.1) {
-        game.player.takeDamage(b.damage);
+      var eyeY = pp.y + game.player.eyeOff;
+      var ddx = pp.x - b.pos.x, ddz = pp.z - b.pos.z, ddy = eyeY - b.pos.y;
+      if (ddx * ddx + ddz * ddz < 0.55 * 0.55 && Math.abs(ddy) < 0.35) {
+        // 传递来源方向（沿弹道反推），供受击方向指示器使用
+        var from = new THREE.Vector3().copy(pp).addScaledVector(b.dir, -1);
+        game.player.takeDamage(b.damage, { from: from });
         game.particles.burst(b.pos, 'flash', 5, 2.5, 0.3);
         this.recycle(b, i);
         continue;
@@ -1484,7 +1541,37 @@ class MapBuilder {
   }
 }
 
-/* ======================= 玩家（移动 / 重力 / 碰撞 / 生命） ======================= */
+/* ======================= 玩家配置表（集中所有可调数值） ======================= */
+var PlayerConfig = {
+  // 移动
+  WALK: 6, SPRINT: 10, CROUCH: 3.2, AIM_MOVE_MULT: 0.7,
+  ACCEL_GROUND: 14, ACCEL_AIR: 3.2,
+  // 身体
+  EYE: 1.7, CROUCH_EYE: 1.15, EYE_LERP: 12, RADIUS: 0.6,
+  // 跳跃 / 重力
+  JUMP_VEL: 8.6, GRAVITY: 24, JUMP_COST: 5, JUMP_CUT_MULT: 0.45,
+  // 耐力
+  STAMINA_MAX: 100, STAMINA_REGEN: 40, STAMINA_DELAY: 0.8,
+  SPRINT_DRAIN: 30, LOW_STAMINA: 15,
+  // 闪避冲刺（双击 WASD）
+  ENABLE_DASH: true, DASH_SPEED: 18, DASH_TIME: 0.18, DASH_CD: 1.0, DASH_COST: 25,
+  DBL_WINDOW: 0.25,
+  // 滑铲（冲刺中按 C）
+  ENABLE_SLIDE: true, SLIDE_COST: 20, SLIDE_DRAIN: 12, SLIDE_MAX: 0.7,
+  SLIDE_END_SPEED: 5, SLIDE_DECAY: 2.2,
+  // 落地反馈
+  LAND_DIP_SMALL: 0.05, LAND_DIP_BIG: 0.09, LAND_VEL_SMALL: 6, LAND_VEL_BIG: 9,
+  // 低血量
+  LOW_HP: 30,
+  // 武器联动
+  AIR_SPREAD_PENALTY: 0.008, CROUCH_SPREAD_MULT: 0.7,
+  // 死亡镜头
+  DEATH_CAM_TIME: 0.9,
+  // 灵敏度
+  SENS_MIN: 0.5, SENS_MAX: 6.0, SENS_STEP: 0.2, SENS_DEFAULT: 2.1
+};
+
+/* ======================= 玩家（移动 / 耐力 / 蹲伏 / 闪避 / 滑铲 / 跳跃 / 生命） ======================= */
 class Player {
   constructor(game) {
     this.game = game;
@@ -1496,94 +1583,264 @@ class Player {
     this.hSpeed = 0;
     this.onGround = true;
     this.sprinting = false;
-    this.dmgTimer = 999;   // 距上次受伤时间（用于回血）
-    this.invulnT = 0;      // 受击无敌帧剩余时间（防止围攻瞬秒）
-    this.knockVelX = 0;    // 受击击退速度（重装兵）
+    this.crouching = false;
+    this.sliding = false;
+    this.slideT = 0;
+    this.dashT = 0;            // 闪避剩余时间（>0 表示闪避中）
+    this.dashCd = 0;           // 闪避冷却
+    this.dashDir = new THREE.Vector3();
+    this.eyeOff = 0;           // 蹲伏眼睛高度偏移（负值向下，平滑过渡）
+    this.dmgTimer = 999;       // 距上次受伤时间（用于回血）
+    this.invulnT = 0;          // 受击无敌帧剩余时间（防止围攻瞬秒）
+    this.knockVelX = 0;        // 受击击退速度（重装兵）
     this.knockVelZ = 0;
-    this.EYE = 1.7;
-    this.RADIUS = 0.6;
+    this.stamina = PlayerConfig.STAMINA_MAX;
+    this.staminaDelay = 0;     // 距上次耐力消耗时间（>0 时禁止回复）
+    this.dmgDirT = 0;          // 受击方向指示剩余时间
+    this.dmgDirAngle = 0;      // 指示器屏幕角度（弧度，0 = 正前方）
+    this.bobT = 0;             // 镜头摆动相位
+    this.breathT = 0;          // 呼吸相位
+    this.landDip = 0;          // 落地镜头下压（衰减中）
+    this.healAcc = 0;          // 回血累计（触发 +6 浮动提示）
+    this.healFx = 0;           // 回血浮动提示显示计时
+    this.god = false;          // 调试：无敌模式
+    this._lastDashKey = '';
+    this._lastDashTime = 0;
+    this._wasOnGround = true;
   }
   reset() {
-    this.pos.set(0, this.EYE, 30);
+    this.pos.set(0, PlayerConfig.EYE, 30);
     this.vel.set(0, 0, 0);
     this.yaw = 0; this.pitch = 0;
     this.hp = 100;
     this.onGround = true;
     this.sprinting = false;
+    this.crouching = false;
+    this.sliding = false; this.slideT = 0;
+    this.dashT = 0; this.dashCd = 0;
+    this.eyeOff = 0;
     this.dmgTimer = 999;
     this.invulnT = 0;
-    this.knockVelX = 0;
-    this.knockVelZ = 0;
+    this.knockVelX = 0; this.knockVelZ = 0;
+    this.stamina = PlayerConfig.STAMINA_MAX;
+    this.staminaDelay = 0;
+    this.dmgDirT = 0;
+    this.bobT = 0; this.breathT = 0;
+    this.landDip = 0; this.healAcc = 0; this.healFx = 0;
+    this._lastDashKey = ''; this._lastDashTime = 0;
+    this._wasOnGround = true;
   }
   update(dt, game) {
-    // 无敌帧计时
+    // 计时器
     if (this.invulnT > 0) this.invulnT -= dt;
-    // 脱战回血（6 秒未受伤后缓慢回复）
+    if (this.dashCd > 0) this.dashCd -= dt;
+    if (this.dmgDirT > 0) this.dmgDirT -= dt;
+    if (this.healFx > 0) this.healFx -= dt;
+    if (this.landDip > 0) this.landDip *= Math.exp(-10 * dt);
+
+    // 脱战回血（6 秒未受伤后缓慢回复，带 +6 浮动提示）
     this.dmgTimer += dt;
-    if (this.dmgTimer > 6 && this.hp < 100) this.hp = Math.min(100, this.hp + 6 * dt);
+    if (this.dmgTimer > 6 && this.hp < 100) {
+      var heal = 6 * dt;
+      this.hp = Math.min(100, this.hp + heal);
+      this.healAcc += heal;
+      if (this.healAcc >= 6) { this.healAcc -= 6; this.healFx = 1; }
+    }
+
+    // 耐力回复（停止消耗 0.8s 后开始）
+    if (this.staminaDelay > 0) this.staminaDelay -= dt;
+    else if (this.stamina < PlayerConfig.STAMINA_MAX) {
+      this.stamina = Math.min(PlayerConfig.STAMINA_MAX, this.stamina + PlayerConfig.STAMINA_REGEN * dt);
+    }
 
     var inp = game.input;
     // 方向键旋转视角：指针锁定不可用时的备用控制方案
     var lookX = (inp.has('ArrowLeft') ? 1 : 0) - (inp.has('ArrowRight') ? 1 : 0);
     var lookY = (inp.has('ArrowUp') ? 1 : 0) - (inp.has('ArrowDown') ? 1 : 0);
     if (lookX || lookY) {
-      this.yaw += lookX * 2.4 * dt;
-      this.pitch = clamp(this.pitch + lookY * 2.4 * dt, -1.5, 1.5);
+      var sensK = game.sens / PlayerConfig.SENS_DEFAULT;
+      this.yaw += lookX * 2.4 * sensK * dt;
+      this.pitch = clamp(this.pitch + lookY * 2.4 * sensK * dt, -1.5, 1.5);
     }
     var f = (inp.has('KeyW') ? 1 : 0) - (inp.has('KeyS') ? 1 : 0);
     var r = (inp.has('KeyD') ? 1 : 0) - (inp.has('KeyA') ? 1 : 0);
-    var sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
-    // 摄像机朝向：yaw=0 时看向 -Z
-    var wx = -sin * f + cos * r;
-    var wz = -cos * f - sin * r;
-    var len = Math.hypot(wx, wz);
-    if (len > 0) { wx /= len; wz /= len; }
 
-    var wantSprint = (inp.has('ShiftLeft') || inp.has('ShiftRight')) && f > 0;
+    // ---- 蹲伏 / 滑铲（C 键） ----
+    if (inp.justPressed.has('KeyC')) {
+      if (this.sliding) this.endSlide();
+      else if (PlayerConfig.ENABLE_SLIDE && this.sprinting && this.onGround && this.stamina >= PlayerConfig.SLIDE_COST) {
+        this.sliding = true; this.crouching = true;
+        this.slideT = PlayerConfig.SLIDE_MAX;
+        this.spendStamina(PlayerConfig.SLIDE_COST);
+        this.sprinting = false;
+      } else this.crouching = !this.crouching;
+    }
+
+    // ---- 双击 WASD 闪避冲刺 ----
+    if (PlayerConfig.ENABLE_DASH) this.tryDash(inp);
+
+    // ---- 冲刺（消耗耐力） ----
+    var wantSprint = (inp.has('ShiftLeft') || inp.has('ShiftRight')) && f > 0
+      && !this.crouching && !this.sliding
+      && this.stamina > PlayerConfig.LOW_STAMINA && game.weapon.aimFrac < 0.5;
     this.sprinting = wantSprint && this.onGround;
-    var speed = this.sprinting ? 10 : 6;
-    wx *= speed; wz *= speed;
+    if (this.sprinting) {
+      this.spendStamina(PlayerConfig.SPRINT_DRAIN * dt);
+      if (this.stamina <= PlayerConfig.LOW_STAMINA) this.sprinting = false;
+    }
+
+    // ---- 滑铲状态推进（惯性衰减，可开枪但会提前结束） ----
+    if (this.sliding) {
+      this.slideT -= dt;
+      var dec = Math.exp(-PlayerConfig.SLIDE_DECAY * dt);
+      this.vel.x *= dec; this.vel.z *= dec;
+      this.spendStamina(PlayerConfig.SLIDE_DRAIN * dt, true);   // 允许扣到 0
+      if (this.slideT <= 0 || Math.hypot(this.vel.x, this.vel.z) < PlayerConfig.SLIDE_END_SPEED
+        || this.stamina <= 0 || inp.mouseLeft) this.endSlide();
+    }
+
+    // ---- 速度选择（冲刺 > 行走 > 蹲伏；瞄准减速） ----
+    var speed = this.sprinting ? PlayerConfig.SPRINT
+      : (this.crouching ? PlayerConfig.CROUCH : PlayerConfig.WALK);
+    if (game.weapon.aimFrac > 0.5) speed *= PlayerConfig.AIM_MOVE_MULT;
+    var wx = 0, wz = 0;
+    if (!this.sliding) {
+      var sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
+      // 摄像机朝向：yaw=0 时看向 -Z
+      wx = -sin * f + cos * r;
+      wz = -cos * f - sin * r;
+      var len = Math.hypot(wx, wz);
+      if (len > 0) { wx /= len; wz /= len; }
+      wx *= speed; wz *= speed;
+    }
 
     // 地面/空中加速（带阻尼）
-    var accel = this.onGround ? 1 - Math.exp(-14 * dt) : 1 - Math.exp(-2.5 * dt);
+    var accel = this.onGround ? 1 - Math.exp(-PlayerConfig.ACCEL_GROUND * dt) : 1 - Math.exp(-PlayerConfig.ACCEL_AIR * dt);
     this.vel.x += (wx - this.vel.x) * accel;
     this.vel.z += (wz - this.vel.z) * accel;
 
-    // 跳跃 + 重力
+    // 闪避中：速度直接锁定（开枪提前中断）
+    if (this.dashT > 0) {
+      this.dashT -= dt;
+      this.vel.x = this.dashDir.x * PlayerConfig.DASH_SPEED;
+      this.vel.z = this.dashDir.z * PlayerConfig.DASH_SPEED;
+      if (inp.mouseLeft) this.dashT = 0;
+    }
+
+    // 跳跃（可变高度：松开空格削减上升速度；蹲伏起跳自动站起）+ 重力
     if (inp.justPressed.has('Space') && this.onGround) {
-      this.vel.y = 8.6;
+      this.vel.y = PlayerConfig.JUMP_VEL;
       this.onGround = false;
+      if (this.crouching) this.crouching = false;
+      if (this.sliding) this.endSlide();
+      this.spendStamina(PlayerConfig.JUMP_COST, true);   // 耐力不足也允许跳（仅扣可用部分）
       game.audio.playJump();
     }
-    this.vel.y -= 24 * dt;
+    if (inp.justReleased.has('Space') && this.vel.y > 0) this.vel.y *= PlayerConfig.JUMP_CUT_MULT;
+    this.vel.y -= PlayerConfig.GRAVITY * dt;
 
-    // 位移 + 碰撞（防止穿墙/穿箱）
+    // ---- 位移 + 碰撞（防止穿墙/穿箱） ----
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
     // 受击击退（重装兵）：带阻尼，且仍经过碰撞解算（不会被打穿墙）
     if (this.knockVelX !== 0 || this.knockVelZ !== 0) {
       this.pos.x += this.knockVelX * dt;
       this.pos.z += this.knockVelZ * dt;
-      var dec = Math.exp(-8 * dt);
-      this.knockVelX *= dec;
-      this.knockVelZ *= dec;
+      var kdec = Math.exp(-8 * dt);
+      this.knockVelX *= kdec;
+      this.knockVelZ *= kdec;
       if (Math.abs(this.knockVelX) < 0.05 && Math.abs(this.knockVelZ) < 0.05) {
         this.knockVelX = 0; this.knockVelZ = 0;
       }
     }
-    resolveCircle(this.pos, this.RADIUS, game.map.colliders.boxes, game.map.colliders.cylinders);
+    resolveCircle(this.pos, PlayerConfig.RADIUS, game.map.colliders.boxes, game.map.colliders.cylinders);
     this.pos.x = clamp(this.pos.x, -55.4, 55.4);
     this.pos.z = clamp(this.pos.z, -55.4, 55.4);
     this.pos.y += this.vel.y * dt;
-    if (this.pos.y <= this.EYE) { this.pos.y = this.EYE; this.vel.y = 0; this.onGround = true; }
-    else this.onGround = false;
+    var wasAir = !this._wasOnGround;
+    if (this.pos.y <= PlayerConfig.EYE) {
+      var fallVel = this.vel.y;                    // 落地瞬间下落速度（负值）
+      this.pos.y = PlayerConfig.EYE;
+      this.vel.y = 0;
+      this.onGround = true;
+      if (wasAir) this.onLand(-fallVel, game);     // 落地反馈
+    } else this.onGround = false;
+    this._wasOnGround = this.onGround;
 
     this.hSpeed = Math.hypot(this.vel.x, this.vel.z);
+
+    // ---- 镜头摆动相位（与武器 bob 同步节奏，纯视觉） ----
+    var moving = this.onGround && this.hSpeed > 0.5 && !this.sliding;
+    if (moving) this.bobT += dt * (this.sprinting ? 11 : 7.5);
+    this.breathT += dt * 1.6;
+
+    // ---- 眼睛高度偏移平滑（蹲伏过渡，作用于相机） ----
+    var targetEyeOff = this.crouching ? PlayerConfig.CROUCH_EYE - PlayerConfig.EYE : 0;
+    this.eyeOff += (targetEyeOff - this.eyeOff) * (1 - Math.exp(-PlayerConfig.EYE_LERP * dt));
+  }
+  /* 消耗耐力（带回复延迟）；allowPartial 时允许不足（跳跃） */
+  spendStamina(cost, allowPartial) {
+    if (allowPartial) cost = Math.min(cost, this.stamina);
+    if (this.stamina < cost) return;
+    this.stamina -= cost;
+    this.staminaDelay = PlayerConfig.STAMINA_DELAY;
+  }
+  /* 双击 WASD 触发闪避冲刺 */
+  tryDash(inp) {
+    if (this.dashT > 0 || this.sliding || this.crouching || this.dashCd > 0) return;
+    if (this.stamina < PlayerConfig.DASH_COST) return;
+    var key = null;
+    if (inp.justPressed.has('KeyW')) key = 'KeyW';
+    else if (inp.justPressed.has('KeyS')) key = 'KeyS';
+    else if (inp.justPressed.has('KeyA')) key = 'KeyA';
+    else if (inp.justPressed.has('KeyD')) key = 'KeyD';
+    if (!key) return;
+    var now = performance.now();
+    if (key === this._lastDashKey && now - this._lastDashTime <= PlayerConfig.DBL_WINDOW * 1000) {
+      // 朝双击方向闪避（无输入方向时向前 = 默认双击键本身的方向）
+      var sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
+      var dx = 0, dz = 0;
+      if (key === 'KeyW') { dx = -sin; dz = -cos; }
+      else if (key === 'KeyS') { dx = sin; dz = cos; }
+      else if (key === 'KeyA') { dx = cos; dz = -sin; }
+      else { dx = -cos; dz = sin; }
+      this.dashDir.set(dx, 0, dz).normalize();
+      this.dashT = PlayerConfig.DASH_TIME;
+      this.dashCd = PlayerConfig.DASH_CD + PlayerConfig.DASH_TIME;
+      this.spendStamina(PlayerConfig.DASH_COST);
+      this.sprinting = false;
+      this.game.shake = Math.min(0.5, this.game.shake + 0.06);   // 闪避镜头震动
+      return;
+    }
+    this._lastDashKey = key;
+    this._lastDashTime = now;
+  }
+  /* 滑铲结束：恢复站立（滑铲必然由冲刺触发，此前未处于蹲伏） */
+  endSlide() {
+    if (!this.sliding) return;
+    this.sliding = false;
+    this.crouching = false;
+  }
+  /* 开火时解除冲刺/闪避/滑铲（不锁枪） */
+  cancelMoveAction() {
+    this.sprinting = false;
+    this.dashT = 0;
+    if (this.sliding) this.endSlide();
+  }
+  /* 落地反馈：镜头下压 + 尘土粒子（纯视觉） */
+  onLand(fallVel, game) {
+    if (fallVel > PlayerConfig.LAND_VEL_BIG) {
+      this.landDip = PlayerConfig.LAND_DIP_BIG;
+      game.particles.burst(new THREE.Vector3(this.pos.x, 0.05, this.pos.z), 'flash', 6, 2.4, 0.3);
+    } else if (fallVel > PlayerConfig.LAND_VEL_SMALL) {
+      this.landDip = PlayerConfig.LAND_DIP_SMALL;
+    }
   }
   takeDamage(dmg, opts) {
     var game = this.game;
     if (game.state !== 'playing') return;
     if (this.invulnT > 0) return;              // 受击无敌帧
+    if (this.god) return;                      // 调试无敌
     this.hp -= dmg;
     this.dmgTimer = 0;
     this.invulnT = 0.4;
@@ -1591,15 +1848,28 @@ class Player {
     game.hitFlashFx = 1;                        // 白色闪光
     game.shake = Math.min(0.5, 0.2 + dmg * 0.012);
     game.audio.playHurt();
+    // 受击方向指示：计算伤害来源在屏幕上的方位角（0 = 正前方，正 = 右侧）
+    if (opts && opts.from) {
+      var dx = opts.from.x - this.pos.x, dz = opts.from.z - this.pos.z;   // 玩家 → 攻击者
+      var d = Math.hypot(dx, dz);
+      if (d > 0.001) {
+        var fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);   // 屏幕前分量轴
+        var rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);    // 屏幕右分量轴
+        var sx = (dx / d) * rx + (dz / d) * rz;
+        var sy = (dx / d) * fx + (dz / d) * fz;
+        this.dmgDirAngle = Math.atan2(sx, sy);
+        this.dmgDirT = 1.2;
+      }
+    }
     // 击退（来自攻击者方向，重装兵专属）：初始速度 = 击退距离 × 8，
     // 配合 exp(-8t) 阻尼，总位移约等于击退距离
     if (opts && opts.knockback) {
-      var dx = this.pos.x - opts.from.x, dz = this.pos.z - opts.from.z;
-      var d = Math.hypot(dx, dz) || 1;
-      this.knockVelX = dx / d * opts.knockback * 8;
-      this.knockVelZ = dz / d * opts.knockback * 8;
+      var kx = this.pos.x - opts.from.x, kz = this.pos.z - opts.from.z;
+      var kd = Math.hypot(kx, kz) || 1;
+      this.knockVelX = kx / kd * opts.knockback * 8;
+      this.knockVelZ = kz / kd * opts.knockback * 8;
     }
-    if (this.hp <= 0) { this.hp = 0; game.gameOver(); }
+    if (this.hp <= 0) { this.hp = 0; game.startDying(); }
   }
 }
 
@@ -1681,6 +1951,22 @@ class Game {
     this.finalStats = document.getElementById('finalStats');
     this.diag = document.getElementById('diag');
     this.hitFlashEl = document.getElementById('hitFlash');
+    this.staminaBar = document.getElementById('staminaBar');
+    this.staminaText = document.getElementById('staminaText');
+    this.healFloat = document.getElementById('healFloat');
+    this.hpBarWrap = document.getElementById('hpBarWrap');
+    this.dmgDir = document.getElementById('dmgDir');
+    this.sensVal = document.getElementById('sensVal');
+    this.sensMinus = document.getElementById('sensMinus');
+    this.sensPlus = document.getElementById('sensPlus');
+
+    // 鼠标灵敏度（localStorage 持久化，隐私模式降级为默认值）
+    this.sens = PlayerConfig.SENS_DEFAULT;
+    try {
+      var saved = parseFloat(localStorage.getItem('fps_sensitivity'));
+      if (isFinite(saved)) this.sens = clamp(saved, PlayerConfig.SENS_MIN, PlayerConfig.SENS_MAX);
+    } catch (e) { /* 忽略 */ }
+    this.sensVal.textContent = this.sens.toFixed(1);
 
     this.bindEvents();
     this.initDebug();
@@ -1715,18 +2001,32 @@ class Game {
           e.group.position.set(self.player.pos.x + dist, 0, self.player.pos.z);
         }
         return e;
+      },
+      refillStamina: function () {
+        self.player.stamina = PlayerConfig.STAMINA_MAX;
+        self.player.staminaDelay = 0;
+      },
+      toggleGod: function () {
+        self.player.god = !self.player.god;
+        self.showToast(self.player.god ? '无敌模式开启（再输入一次关闭）' : '无敌模式关闭');
+      },
+      setSens: function (v) {
+        self.sens = clamp(v, PlayerConfig.SENS_MIN, PlayerConfig.SENS_MAX);
+        self.sensVal.textContent = self.sens.toFixed(1);
+        try { localStorage.setItem('fps_sensitivity', String(self.sens)); } catch (e) { /* 忽略 */ }
       }
     };
   }
 
   bindEvents() {
     var self = this;
-    // 鼠标视角（Pointer Lock）
+    // 鼠标视角（Pointer Lock），灵敏度可在暂停界面调节
     document.addEventListener('mousemove', function (e) {
       if (self.state !== 'playing') return;
       if (document.pointerLockElement !== self.canvas) return;
-      self.player.yaw -= e.movementX * 0.0021;
-      self.player.pitch = clamp(self.player.pitch - e.movementY * 0.0021, -1.5, 1.5);
+      var k = self.sens * 0.001;
+      self.player.yaw -= e.movementX * k;
+      self.player.pitch = clamp(self.player.pitch - e.movementY * k, -1.5, 1.5);
     });
     document.addEventListener('mousedown', function (e) {
       if (e.button === 0) self.input.mouseLeft = true;
@@ -1786,6 +2086,17 @@ class Game {
       try { self.audio.init(); self.audio.resume(); } catch (e) { /* 音频不可用不影响游戏 */ }
       self.startGame();
     });
+    // 灵敏度调节（暂停界面）
+    self.sensMinus.addEventListener('click', function () { self.changeSens(-1); });
+    self.sensPlus.addEventListener('click', function () { self.changeSens(1); });
+  }
+
+  /* 灵敏度增减（±0.2，持久化到 localStorage） */
+  changeSens(dir) {
+    this.sens = clamp(Math.round((this.sens + dir * PlayerConfig.SENS_STEP) * 10) / 10,
+      PlayerConfig.SENS_MIN, PlayerConfig.SENS_MAX);
+    this.sensVal.textContent = this.sens.toFixed(1);
+    try { localStorage.setItem('fps_sensitivity', String(this.sens)); } catch (e) { /* 忽略 */ }
   }
 
   /* ---------- 开始 / 重新开始 ---------- */
@@ -1820,6 +2131,13 @@ class Game {
     }, 900);
     this.audio.playStart();
     this.enemies.startNextWave();
+  }
+
+  /* 死亡表现：进入 dying 阶段（慢动作镜头下坠），结束后弹出结算 */
+  startDying() {
+    if (this.state === 'dying' || this.state === 'gameover') return;
+    this.state = 'dying';
+    this.dyingT = 0;
   }
 
   gameOver() {
@@ -1890,10 +2208,22 @@ class Game {
         } else {
           cam.position.copy(this.player.pos);
         }
-        // FOV：瞄准 55 / 冲刺 84 / 默认 75
+        cam.position.y += this.player.eyeOff;   // 蹲伏眼睛高度偏移
+        // 镜头摆动（行走/冲刺）/ 呼吸（静止）/ 落地下压（纯视觉）
+        var pl = this.player;
+        if (pl.hSpeed > 0.5 && pl.onGround && !pl.sliding) {
+          var bobAmp = 0.006 * (this.weapon.aimFrac > 0.5 ? 0.5 : 1);
+          cam.position.y += Math.abs(Math.sin(pl.bobT)) * bobAmp;
+        } else {
+          var breathAmp = 0.003 * (pl.hp <= PlayerConfig.LOW_HP ? 2 : 1);
+          cam.position.y += Math.sin(pl.breathT) * breathAmp;
+        }
+        if (pl.landDip > 0) cam.position.y -= pl.landDip;
+        // FOV：闪避 92 / 瞄准 55 / 冲刺 84 / 默认 75
         var targetFov = 75;
-        if (this.weapon.aimFrac > 0.5) targetFov = 55;
-        else if (this.player.sprinting) targetFov = 84;
+        if (pl.dashT > 0) targetFov = 92;
+        else if (this.weapon.aimFrac > 0.5) targetFov = 55;
+        else if (pl.sprinting) targetFov = 84;
         if (Math.abs(cam.fov - targetFov) > 0.05) {
           cam.fov += (targetFov - cam.fov) * (1 - Math.exp(-10 * dt));
           cam.updateProjectionMatrix();
@@ -1903,6 +2233,18 @@ class Game {
         this.hitFlashFx *= Math.exp(-8 * dt);   // 受击白色闪光衰减
         this.updateHud();
         this.input.clearPressed();
+      } else if (this.state === 'dying') {
+        // 死亡表现：0.9s 慢动作镜头（敌人/子弹冻结，仅镜头动画 + 红黑渐晕）
+        this.dyingT += this.dt;
+        this.damageFx = Math.min(1, this.damageFx + this.dt * 1.2);
+        var cam = this.camera;
+        cam.rotation.y = this.player.yaw;
+        cam.rotation.x += (-1.2 - cam.rotation.x) * (1 - Math.exp(-4 * this.dt));  // 镜头下坠
+        cam.position.copy(this.player.pos);
+        cam.position.y -= this.dyingT * 0.35;
+        this.updateHud();
+        this.input.clearPressed();
+        if (this.dyingT >= PlayerConfig.DEATH_CAM_TIME) this.gameOver();
       }
       this.renderer.render(this.scene, this.camera);
     } catch (err) {
@@ -1930,10 +2272,29 @@ class Game {
     }
     this.scoreText.textContent = this.score;
     this.waveText.textContent = '第 ' + this.enemies.wave + ' 波';
+    // 受击红晕 + 低血量脉动（纯视觉心跳）
+    var lowHp = p.hp > 0 && p.hp <= PlayerConfig.LOW_HP;
+    var pulse = lowHp ? 0.14 + Math.sin(this.time * 6) * 0.07 : 0;
     this.damageOverlay.style.opacity =
-      Math.min(1, this.damageFx * 0.8 + (p.hp < 30 ? (1 - p.hp / 30) * 0.18 : 0)).toFixed(3);
+      Math.min(1, this.damageFx * 0.8 + (p.hp < PlayerConfig.LOW_HP ? (1 - p.hp / PlayerConfig.LOW_HP) * 0.18 : 0) + pulse).toFixed(3);
     // 受击白色闪光
     this.hitFlashEl.style.opacity = Math.min(1, this.hitFlashFx * 0.7).toFixed(3);
+    // 耐力条（低耐力红闪）
+    var st = Math.max(0, p.stamina) / PlayerConfig.STAMINA_MAX;
+    this.staminaBar.style.width = (st * 100).toFixed(1) + '%';
+    var stLow = p.stamina <= PlayerConfig.LOW_STAMINA;
+    this.staminaBar.classList.toggle('low', stLow);
+    this.staminaText.textContent = Math.ceil(p.stamina);
+    this.staminaText.classList.toggle('low', stLow);
+    // 回血浮动提示 + 血条发光
+    if (p.healFx > 0) this.healFloat.classList.add('show');
+    else this.healFloat.classList.remove('show');
+    this.hpBarWrap.classList.toggle('glow', p.dmgTimer > 6 && p.hp < 100);
+    // 受击方向指示器（屏幕边缘弧形，指向伤害来源）
+    if (p.dmgDirT > 0) {
+      this.dmgDir.style.transform = 'rotate(' + (p.dmgDirAngle * 180 / Math.PI).toFixed(1) + 'deg)';
+      this.dmgDir.classList.add('show');
+    } else this.dmgDir.classList.remove('show');
     // 准星扩散
     var px = 6 + w.spread * 1150 + (w.reloading ? 8 : 0);
     document.documentElement.style.setProperty('--spread', px.toFixed(1) + 'px');

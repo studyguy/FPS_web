@@ -4,6 +4,7 @@ _shot.png
 _check.js
 _main.js
 _vmtest.js
+_node_test.js
 *.log
 
 # 系统文件
