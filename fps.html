@@ -176,7 +176,7 @@
   <div id="hitmarker"><span class="h1"></span><span class="h2"></span><span class="h3"></span><span class="h4"></span></div>
   <div id="wavebanner"></div>
   <div id="toast"></div>
-  <div id="hint">WASD 移动 · 空格 跳跃 · Shift 冲刺 · C 蹲伏 · 冲刺中C 滑铲 · 双击WASD 闪避 · 左键 射击 · 右键 瞄准 · R 换弹 · M 静音 · Esc 暂停</div>
+  <div id="hint">WASD 移动 · 空格 跳跃 · Shift 冲刺 · C 蹲伏 · 左键 射击 · 右键 瞄准 · R 换弹 · M 静音 · Esc 暂停</div>
   <div id="diag"></div>
 </div>
 <div id="damageOverlay"></div>
@@ -195,8 +195,6 @@
     <li><b>空格</b> 跳跃（轻点小跳）</li>
     <li><b>Shift</b> 加速跑（消耗耐力）</li>
     <li><b>C</b> 蹲伏（可躲射手弹道）</li>
-    <li><b>双击 WASD</b> 闪避冲刺</li>
-    <li><b>冲刺中 C</b> 滑铲</li>
     <li><b>R</b> 换弹</li>
     <li><b>M</b> 声音开关</li>
     <li><b>方向键</b> 转视角（备用）</li>
@@ -509,9 +507,8 @@ class Input {
     this.justReleased = new Set();// 本帧刚松开的键（边沿触发）
     this.mouseLeft = false;
     this.mouseRight = false;
-    this.pressTime = {};         // 每个键最近一次按下时间（ms，用于双击判定）
   }
-  press(c) { if (!this.keys.has(c)) this.justPressed.add(c); this.keys.add(c); this.pressTime[c] = performance.now(); }
+  press(c) { if (!this.keys.has(c)) this.justPressed.add(c); this.keys.add(c); }
   release(c) { if (this.keys.has(c)) this.justReleased.add(c); this.keys.delete(c); }
   has(c) { return this.keys.has(c); }
   clearPressed() { this.justPressed.clear(); this.justReleased.clear(); }
@@ -1553,12 +1550,6 @@ var PlayerConfig = {
   // 耐力
   STAMINA_MAX: 100, STAMINA_REGEN: 40, STAMINA_DELAY: 0.8,
   SPRINT_DRAIN: 30, LOW_STAMINA: 15,
-  // 闪避冲刺（双击 WASD）
-  ENABLE_DASH: true, DASH_SPEED: 18, DASH_TIME: 0.18, DASH_CD: 1.0, DASH_COST: 25,
-  DBL_WINDOW: 0.25,
-  // 滑铲（冲刺中按 C）
-  ENABLE_SLIDE: true, SLIDE_COST: 20, SLIDE_DRAIN: 12, SLIDE_MAX: 0.7,
-  SLIDE_END_SPEED: 5, SLIDE_DECAY: 2.2,
   // 落地反馈
   LAND_DIP_SMALL: 0.05, LAND_DIP_BIG: 0.09, LAND_VEL_SMALL: 6, LAND_VEL_BIG: 9,
   // 低血量
@@ -1571,7 +1562,7 @@ var PlayerConfig = {
   SENS_MIN: 0.5, SENS_MAX: 6.0, SENS_STEP: 0.2, SENS_DEFAULT: 2.1
 };
 
-/* ======================= 玩家（移动 / 耐力 / 蹲伏 / 闪避 / 滑铲 / 跳跃 / 生命） ======================= */
+/* ======================= 玩家（移动 / 耐力 / 蹲伏 / 跳跃 / 生命） ======================= */
 class Player {
   constructor(game) {
     this.game = game;
@@ -1584,11 +1575,6 @@ class Player {
     this.onGround = true;
     this.sprinting = false;
     this.crouching = false;
-    this.sliding = false;
-    this.slideT = 0;
-    this.dashT = 0;            // 闪避剩余时间（>0 表示闪避中）
-    this.dashCd = 0;           // 闪避冷却
-    this.dashDir = new THREE.Vector3();
     this.eyeOff = 0;           // 蹲伏眼睛高度偏移（负值向下，平滑过渡）
     this.dmgTimer = 999;       // 距上次受伤时间（用于回血）
     this.invulnT = 0;          // 受击无敌帧剩余时间（防止围攻瞬秒）
@@ -1604,8 +1590,6 @@ class Player {
     this.healAcc = 0;          // 回血累计（触发 +6 浮动提示）
     this.healFx = 0;           // 回血浮动提示显示计时
     this.god = false;          // 调试：无敌模式
-    this._lastDashKey = '';
-    this._lastDashTime = 0;
     this._wasOnGround = true;
   }
   reset() {
@@ -1616,8 +1600,6 @@ class Player {
     this.onGround = true;
     this.sprinting = false;
     this.crouching = false;
-    this.sliding = false; this.slideT = 0;
-    this.dashT = 0; this.dashCd = 0;
     this.eyeOff = 0;
     this.dmgTimer = 999;
     this.invulnT = 0;
@@ -1627,13 +1609,11 @@ class Player {
     this.dmgDirT = 0;
     this.bobT = 0; this.breathT = 0;
     this.landDip = 0; this.healAcc = 0; this.healFx = 0;
-    this._lastDashKey = ''; this._lastDashTime = 0;
     this._wasOnGround = true;
   }
   update(dt, game) {
     // 计时器
     if (this.invulnT > 0) this.invulnT -= dt;
-    if (this.dashCd > 0) this.dashCd -= dt;
     if (this.dmgDirT > 0) this.dmgDirT -= dt;
     if (this.healFx > 0) this.healFx -= dt;
     if (this.landDip > 0) this.landDip *= Math.exp(-10 * dt);
@@ -1665,23 +1645,12 @@ class Player {
     var f = (inp.has('KeyW') ? 1 : 0) - (inp.has('KeyS') ? 1 : 0);
     var r = (inp.has('KeyD') ? 1 : 0) - (inp.has('KeyA') ? 1 : 0);
 
-    // ---- 蹲伏 / 滑铲（C 键） ----
-    if (inp.justPressed.has('KeyC')) {
-      if (this.sliding) this.endSlide();
-      else if (PlayerConfig.ENABLE_SLIDE && this.sprinting && this.onGround && this.stamina >= PlayerConfig.SLIDE_COST) {
-        this.sliding = true; this.crouching = true;
-        this.slideT = PlayerConfig.SLIDE_MAX;
-        this.spendStamina(PlayerConfig.SLIDE_COST);
-        this.sprinting = false;
-      } else this.crouching = !this.crouching;
-    }
+    // ---- 蹲伏（C 键切换） ----
+    if (inp.justPressed.has('KeyC')) this.crouching = !this.crouching;
 
-    // ---- 双击 WASD 闪避冲刺 ----
-    if (PlayerConfig.ENABLE_DASH) this.tryDash(inp);
-
-    // ---- 冲刺（消耗耐力） ----
+    // ---- 冲刺（按住 Shift，消耗耐力） ----
     var wantSprint = (inp.has('ShiftLeft') || inp.has('ShiftRight')) && f > 0
-      && !this.crouching && !this.sliding
+      && !this.crouching
       && this.stamina > PlayerConfig.LOW_STAMINA && game.weapon.aimFrac < 0.5;
     this.sprinting = wantSprint && this.onGround;
     if (this.sprinting) {
@@ -1689,50 +1658,28 @@ class Player {
       if (this.stamina <= PlayerConfig.LOW_STAMINA) this.sprinting = false;
     }
 
-    // ---- 滑铲状态推进（惯性衰减，可开枪但会提前结束） ----
-    if (this.sliding) {
-      this.slideT -= dt;
-      var dec = Math.exp(-PlayerConfig.SLIDE_DECAY * dt);
-      this.vel.x *= dec; this.vel.z *= dec;
-      this.spendStamina(PlayerConfig.SLIDE_DRAIN * dt, true);   // 允许扣到 0
-      if (this.slideT <= 0 || Math.hypot(this.vel.x, this.vel.z) < PlayerConfig.SLIDE_END_SPEED
-        || this.stamina <= 0 || inp.mouseLeft) this.endSlide();
-    }
-
     // ---- 速度选择（冲刺 > 行走 > 蹲伏；瞄准减速） ----
     var speed = this.sprinting ? PlayerConfig.SPRINT
       : (this.crouching ? PlayerConfig.CROUCH : PlayerConfig.WALK);
     if (game.weapon.aimFrac > 0.5) speed *= PlayerConfig.AIM_MOVE_MULT;
-    var wx = 0, wz = 0;
-    if (!this.sliding) {
-      var sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
-      // 摄像机朝向：yaw=0 时看向 -Z
-      wx = -sin * f + cos * r;
-      wz = -cos * f - sin * r;
-      var len = Math.hypot(wx, wz);
-      if (len > 0) { wx /= len; wz /= len; }
-      wx *= speed; wz *= speed;
-    }
+    var sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
+    // 摄像机朝向：yaw=0 时看向 -Z
+    var wx = -sin * f + cos * r;
+    var wz = -cos * f - sin * r;
+    var len = Math.hypot(wx, wz);
+    if (len > 0) { wx /= len; wz /= len; }
+    wx *= speed; wz *= speed;
 
     // 地面/空中加速（带阻尼）
     var accel = this.onGround ? 1 - Math.exp(-PlayerConfig.ACCEL_GROUND * dt) : 1 - Math.exp(-PlayerConfig.ACCEL_AIR * dt);
     this.vel.x += (wx - this.vel.x) * accel;
     this.vel.z += (wz - this.vel.z) * accel;
 
-    // 闪避中：速度直接锁定（开枪提前中断）
-    if (this.dashT > 0) {
-      this.dashT -= dt;
-      this.vel.x = this.dashDir.x * PlayerConfig.DASH_SPEED;
-      this.vel.z = this.dashDir.z * PlayerConfig.DASH_SPEED;
-      if (inp.mouseLeft) this.dashT = 0;
-    }
-
     // 跳跃（可变高度：松开空格削减上升速度；蹲伏起跳自动站起）+ 重力
     if (inp.justPressed.has('Space') && this.onGround) {
       this.vel.y = PlayerConfig.JUMP_VEL;
       this.onGround = false;
       if (this.crouching) this.crouching = false;
-      if (this.sliding) this.endSlide();
       this.spendStamina(PlayerConfig.JUMP_COST, true);   // 耐力不足也允许跳（仅扣可用部分）
       game.audio.playJump();
     }
@@ -1770,7 +1717,7 @@ class Player {
     this.hSpeed = Math.hypot(this.vel.x, this.vel.z);
 
     // ---- 镜头摆动相位（与武器 bob 同步节奏，纯视觉） ----
-    var moving = this.onGround && this.hSpeed > 0.5 && !this.sliding;
+    var moving = this.onGround && this.hSpeed > 0.5;
     if (moving) this.bobT += dt * (this.sprinting ? 11 : 7.5);
     this.breathT += dt * 1.6;
 
@@ -1785,47 +1732,9 @@ class Player {
     this.stamina -= cost;
     this.staminaDelay = PlayerConfig.STAMINA_DELAY;
   }
-  /* 双击 WASD 触发闪避冲刺 */
-  tryDash(inp) {
-    if (this.dashT > 0 || this.sliding || this.crouching || this.dashCd > 0) return;
-    if (this.stamina < PlayerConfig.DASH_COST) return;
-    var key = null;
-    if (inp.justPressed.has('KeyW')) key = 'KeyW';
-    else if (inp.justPressed.has('KeyS')) key = 'KeyS';
-    else if (inp.justPressed.has('KeyA')) key = 'KeyA';
-    else if (inp.justPressed.has('KeyD')) key = 'KeyD';
-    if (!key) return;
-    var now = performance.now();
-    if (key === this._lastDashKey && now - this._lastDashTime <= PlayerConfig.DBL_WINDOW * 1000) {
-      // 朝双击方向闪避（无输入方向时向前 = 默认双击键本身的方向）
-      var sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
-      var dx = 0, dz = 0;
-      if (key === 'KeyW') { dx = -sin; dz = -cos; }
-      else if (key === 'KeyS') { dx = sin; dz = cos; }
-      else if (key === 'KeyA') { dx = cos; dz = -sin; }
-      else { dx = -cos; dz = sin; }
-      this.dashDir.set(dx, 0, dz).normalize();
-      this.dashT = PlayerConfig.DASH_TIME;
-      this.dashCd = PlayerConfig.DASH_CD + PlayerConfig.DASH_TIME;
-      this.spendStamina(PlayerConfig.DASH_COST);
-      this.sprinting = false;
-      this.game.shake = Math.min(0.5, this.game.shake + 0.06);   // 闪避镜头震动
-      return;
-    }
-    this._lastDashKey = key;
-    this._lastDashTime = now;
-  }
-  /* 滑铲结束：恢复站立（滑铲必然由冲刺触发，此前未处于蹲伏） */
-  endSlide() {
-    if (!this.sliding) return;
-    this.sliding = false;
-    this.crouching = false;
-  }
-  /* 开火时解除冲刺/闪避/滑铲（不锁枪） */
+  /* 开火时解除冲刺（不锁枪） */
   cancelMoveAction() {
     this.sprinting = false;
-    this.dashT = 0;
-    if (this.sliding) this.endSlide();
   }
   /* 落地反馈：镜头下压 + 尘土粒子（纯视觉） */
   onLand(fallVel, game) {
@@ -2211,7 +2120,7 @@ class Game {
         cam.position.y += this.player.eyeOff;   // 蹲伏眼睛高度偏移
         // 镜头摆动（行走/冲刺）/ 呼吸（静止）/ 落地下压（纯视觉）
         var pl = this.player;
-        if (pl.hSpeed > 0.5 && pl.onGround && !pl.sliding) {
+        if (pl.hSpeed > 0.5 && pl.onGround) {
           var bobAmp = 0.006 * (this.weapon.aimFrac > 0.5 ? 0.5 : 1);
           cam.position.y += Math.abs(Math.sin(pl.bobT)) * bobAmp;
         } else {
@@ -2219,10 +2128,9 @@ class Game {
           cam.position.y += Math.sin(pl.breathT) * breathAmp;
         }
         if (pl.landDip > 0) cam.position.y -= pl.landDip;
-        // FOV：闪避 92 / 瞄准 55 / 冲刺 84 / 默认 75
+        // FOV：瞄准 55 / 冲刺 84 / 默认 75
         var targetFov = 75;
-        if (pl.dashT > 0) targetFov = 92;
-        else if (this.weapon.aimFrac > 0.5) targetFov = 55;
+        if (this.weapon.aimFrac > 0.5) targetFov = 55;
         else if (pl.sprinting) targetFov = 84;
         if (Math.abs(cam.fov - targetFov) > 0.05) {
           cam.fov += (targetFov - cam.fov) * (1 - Math.exp(-10 * dt));
