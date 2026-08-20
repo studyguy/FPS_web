@@ -768,29 +768,29 @@ var WEAPONS = {
   pistol: {
     id: 'pistol', name: '手枪', key: 1, unlocked: true, unlockWave: 0,
     damage: 25, fireRate: 5, magSize: 12, reserve: 0, reserveInf: true,
-    reloadTime: 1.2, switchTime: 0.25, baseSpread: 0.004, moveSpread: 0.007,
-    kickP: 0.006, kickY: 0.005, kickMax: 0.05, aimFov: 75, moveMul: 1.0,
+    reloadTime: 1.2, switchTime: 0.25, staticSpread: 0.003, moveSpread: 0.005,
+    heatSpread: 0.0003, adsMult: 0.5, kickP: 0.006, kickY: 0.005, kickMax: 0.05, aimFov: 75, moveMul: 1.0,
     pellets: 1, knock: 0, auto: false, color: 0x2e333c, dark: 0x1a1e26, accent: 0x8a8f98
   },
   rifle: {
     id: 'rifle', name: '步枪', key: 2, unlocked: false, unlockWave: 1,
     damage: 34, fireRate: 9, magSize: 30, reserve: 150, reserveInf: false,
-    reloadTime: 1.6, switchTime: 0.4, baseSpread: 0.006, moveSpread: 0.014,
-    kickP: 0.011, kickY: 0.005, kickMax: 0.1, aimFov: 55, moveMul: 1.0,
+    reloadTime: 1.6, switchTime: 0.4, staticSpread: 0.006, moveSpread: 0.013,
+    heatSpread: 0.0009, adsMult: 0.35, kickP: 0.011, kickY: 0.005, kickMax: 0.1, aimFov: 55, moveMul: 1.0,
     pellets: 1, knock: 0, auto: true, color: 0x2e333c, dark: 0x191d24, accent: 0xc9562b
   },
   shotgun: {
     id: 'shotgun', name: '霰弹枪', key: 3, unlocked: false, unlockWave: 3,
     damage: 13, fireRate: 1.2, magSize: 6, reserve: 36, reserveInf: false,
-    reloadTime: 2.4, switchTime: 0.45, baseSpread: 0.05, moveSpread: 0.03,
-    kickP: 0.03, kickY: 0.012, kickMax: 0.16, aimFov: 75, moveMul: 0.9,
+    reloadTime: 2.4, switchTime: 0.45, staticSpread: 0.045, moveSpread: 0.028,
+    heatSpread: 0, adsMult: 0.55, kickP: 0.03, kickY: 0.012, kickMax: 0.16, aimFov: 75, moveMul: 0.9,
     pellets: 8, knock: 1.2, auto: false, color: 0x3a2c1e, dark: 0x241a10, accent: 0x8a5a2e
   },
   sniper: {
     id: 'sniper', name: '狙击枪', key: 4, unlocked: false, unlockWave: 5,
     damage: 110, fireRate: 0.9, magSize: 5, reserve: 20, reserveInf: false,
-    reloadTime: 2.0, switchTime: 0.5, baseSpread: 0.0005, moveSpread: 0.02,
-    kickP: 0.05, kickY: 0.008, kickMax: 0.22, aimFov: 28, moveMul: 0.85,
+    reloadTime: 2.0, switchTime: 0.5, staticSpread: 0.0005, moveSpread: 0.04,
+    heatSpread: 0, adsMult: 0.08, kickP: 0.05, kickY: 0.008, kickMax: 0.22, aimFov: 28, moveMul: 0.85,
     pellets: 1, knock: 0, auto: false, color: 0x24351f, dark: 0x141f12, accent: 0x5a8a4a
   }
 };
@@ -840,8 +840,8 @@ class Weapon {
     this.reloading = false;
     this.reloadTime = cfg.reloadTime;
     this.reloadT = 0;
-    this.baseSpread = cfg.baseSpread;
-    this.spread = cfg.baseSpread;
+    this.baseSpread = cfg.staticSpread;
+    this.spread = cfg.staticSpread;
     this.fireHeat = 0;
     this.kickPitch = 0;
     this.kickYaw = 0;
@@ -983,11 +983,12 @@ class Weapon {
 
     // 准星扩散：随移动速度与连发热量增大，瞄准时缩小；蹲伏更稳、空中更散
     var speedF = Math.min(1, game.player.hSpeed / 10);
-    var target = this.baseSpread * this.spreadMul + speedF * this.cfg.moveSpread
-      + Math.min(this.fireHeat, 12) * 0.0006;
+    var target = this.cfg.staticSpread * this.spreadMul
+      + speedF * this.cfg.moveSpread
+      + Math.min(this.fireHeat, 12) * this.cfg.heatSpread;
     if (game.player.crouching) target *= PlayerConfig.CROUCH_SPREAD_MULT;
     if (!game.player.onGround) target += PlayerConfig.AIR_SPREAD_PENALTY;
-    target *= 1 - 0.62 * this.aimFrac;
+    target *= 1 - this.aimFrac * (1 - this.cfg.adsMult);   // 开镜收敛到 adsMult（狙击几乎零扩散）
     this.spread += (target - this.spread) * (1 - Math.exp(-9 * dt));
     this.fireHeat *= Math.exp(-2.4 * dt);
 
@@ -1757,6 +1758,7 @@ class Enemy {
       game.showBanner('坦克已被消灭！奖励已发放');
       game.shake = Math.max(game.shake, 0.5);
       game.particles.burst(this.group.position, 'flash', 16, 4, 0.6);
+      game.pickups.spawnRewardBox(this.group.position.x, this.group.position.z);   // 奖励箱（必出功能道具）
     }
   }
 }
@@ -2209,31 +2211,34 @@ var ITEMS = {
 class PickupManager {
   constructor(game) {
     this.game = game;
-    this.boxSlots = [[12, 40], [-12, -40], [36, 16]];       // 道具箱槽位（r≈40 安全区）
+    this.boxSlots = [[12, 40], [-12, -40], [36, 16], [-32, 30], [34, -30]];   // 道具箱槽位（r≈40 环形分布）
     this.weaponSlots = [[30, 26], [-30, -26]];              // 武器箱槽位
     this.boxes = [];
     this.weaponBox = null;
+    this.pickupCd = 0;      // 拾取冷却（防一次拾两个）
     var self = this;
+    // 道具箱标记：白色感叹号（军需物资）
     this.itemTex = makeTex(64, function (g, s) {
-      g.fillStyle = '#ffd94a';
+      g.fillStyle = '#ffffff';
       g.font = 'bold 46px sans-serif';
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText('?', s / 2, s / 2 + 2);
+      g.fillText('!', s / 2, s / 2 + 2);
     });
+    // 武器箱标记：白色"械"字（军械箱）
     this.wepTex = makeTex(64, function (g, s) {
-      g.fillStyle = '#7dff9a';
-      g.font = 'bold 42px sans-serif';
+      g.fillStyle = '#ffffff';
+      g.font = 'bold 44px sans-serif';
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText('W', s / 2, s / 2 + 2);
+      g.fillText('械', s / 2, s / 2 + 2);
     });
-    for (var i = 0; i < 3; i++) this.boxes.push(this.makeBox(0, 0, this.itemTex));
+    for (var i = 0; i < 5; i++) this.boxes.push(this.makeBox(0, 0, this.itemTex));
     this.weaponBox = this.makeBox(0, 0, this.wepTex);
   }
   makeBox(x, z, tex) {
     var game = this.game;
     var grp = new THREE.Group();
     var box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1),
-      new THREE.MeshStandardMaterial({ color: 0x4a3a1e, roughness: 0.7 }));
+      new THREE.MeshStandardMaterial({ color: 0x4a4f2f, roughness: 0.9 }));   // 军绿橄榄
     box.position.y = 0.55;
     box.castShadow = box.receiveShadow = true;
     grp.add(box);
@@ -2241,26 +2246,42 @@ class PickupManager {
       new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
     sign.position.set(0, 0.55, 0.56);
     grp.add(sign);
-    var pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffd94a, transparent: true, opacity: 0.35,
+    // 顶部暖黄信标灯（闪烁）
+    var beacon = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.22),
+      new THREE.MeshBasicMaterial({ color: 0xffb84d }));
+    beacon.position.y = 1.28;
+    grp.add(beacon);
+    // 暖黄光柱（6m 高，远处可见）
+    var pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 6, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffc86a, transparent: true, opacity: 0.5,
         blending: THREE.AdditiveBlending, depthWrite: false }));
-    pillar.position.y = 2;
+    pillar.position.y = 3;
     grp.add(pillar);
+    // 顶部光点
+    var tip = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd94a }));
+    tip.position.y = 6;
+    grp.add(tip);
     grp.position.set(x, 0, z);
     grp.visible = false;
     game.scene.add(grp);
-    return { group: grp, active: false, x: x, z: z, t: Math.random() * 10 };
+    return { group: grp, active: false, x: x, z: z, t: Math.random() * 10, reward: false, rewardT: 0 };
   }
-  /* 波间刷新：2 道具箱（3 槽随机）+ 1 武器箱 */
+  /* 波间刷新：2 道具箱（5 槽随机 2，槽位占用检查）+ 1 武器箱 */
   refreshBetween() {
     var slots = shuffleArr(this.boxSlots.slice(), mulberry32(Math.floor(Math.random() * 1e9)));
     var need = 2;
     for (var i = 0; i < this.boxes.length && need > 0; i++) {
       if (this.boxes[i].active) continue;
-      var slot = slots[need - 1];
+      var slot = null;
+      for (var si = 0; si < slots.length; si++) {
+        if (!this.slotOccupied(slots[si])) { slot = slots[si]; slots.splice(si, 1); break; }
+      }
+      if (!slot) break;                    // 槽位全占用 → 本次不刷
       this.boxes[i].x = slot[0]; this.boxes[i].z = slot[1];
       this.boxes[i].group.position.set(slot[0], 0, slot[1]);
       this.boxes[i].active = true;
+      this.boxes[i].reward = false;
       this.boxes[i].group.visible = true;
       need--;
     }
@@ -2270,24 +2291,52 @@ class PickupManager {
     this.weaponBox.active = true;
     this.weaponBox.group.visible = true;
   }
-  /* 波中补 1 个道具箱（场上 <1 时） */
+  /* 槽位占用检查：某坐标是否已有激活的道具箱（防重合） */
+  slotOccupied(x, z) {
+    for (var i = 0; i < this.boxes.length; i++) {
+      if (this.boxes[i].active && this.boxes[i].x === x && this.boxes[i].z === z) return true;
+    }
+    return false;
+  }
+  /* 波中补 1 个道具箱（场上 <1 时；选未占用槽位） */
   refreshMidWave() {
     var activeCount = 0;
     for (var i = 0; i < this.boxes.length; i++) if (this.boxes[i].active) activeCount++;
     if (activeCount >= 1) return;
+    var slots = shuffleArr(this.boxSlots.slice(), mulberry32(Math.floor(Math.random() * 1e9)));
     for (var j = 0; j < this.boxes.length; j++) {
       if (!this.boxes[j].active) {
-        var slot = this.boxSlots[Math.floor(Math.random() * this.boxSlots.length)];
+        var slot = null;
+        for (var si = 0; si < slots.length; si++) {
+          if (!this.slotOccupied(slots[si][0], slots[si][1])) { slot = slots[si]; break; }
+        }
+        if (!slot) return;
         this.boxes[j].x = slot[0]; this.boxes[j].z = slot[1];
         this.boxes[j].group.position.set(slot[0], 0, slot[1]);
         this.boxes[j].active = true;
+        this.boxes[j].reward = false;
         this.boxes[j].group.visible = true;
         return;
       }
     }
   }
-  /* 掉落加权：功能 60% / 增强 40%，按波次过滤 */
+  /* 坦克奖励箱：Boss 死亡位置掉落，必出功能道具，30s 后消失 */
+  spawnRewardBox(x, z) {
+    for (var i = 0; i < this.boxes.length; i++) {
+      if (!this.boxes[i].active) {
+        this.boxes[i].x = x; this.boxes[i].z = z;
+        this.boxes[i].group.position.set(x, 0, z);
+        this.boxes[i].active = true;
+        this.boxes[i].reward = true;
+        this.boxes[i].rewardT = 30;
+        this.boxes[i].group.visible = true;
+        return;
+      }
+    }
+  }
+  /* 掉落加权：功能 60% / 增强 40%；w1~2 教学期只出回血/弹药 */
   rollItem(wave) {
+    if (wave <= 2) return Math.random() < 0.5 ? 'heal' : 'ammo';
     var funs = [], ups = [];
     for (var k in ITEMS) {
       if (ITEMS[k].wave > wave) continue;
@@ -2298,9 +2347,10 @@ class PickupManager {
   }
   pickupBox(box) {
     var g = this.game;
-    var item = this.rollItem(g.enemies.wave || 1);
+    var item = box.reward ? this.rollFunOnly(g.enemies.wave || 1) : this.rollItem(g.enemies.wave || 1);
     box.active = false;
     box.group.visible = false;
+    box.reward = false;
     if (!item) return;
     var cfg = ITEMS[item];
     if (cfg.fun) {
@@ -2310,6 +2360,13 @@ class PickupManager {
       g.weapon.upgrade(cfg.kind);
     }
     g.particles.burst(new THREE.Vector3(box.x, 1, box.z), 'flash', 8, 2.5, 0.4);
+  }
+  rollFunOnly(wave) {
+    var funs = [];
+    for (var k in ITEMS) {
+      if (ITEMS[k].fun && ITEMS[k].wave <= wave) funs.push(k);
+    }
+    return funs.length ? funs[Math.floor(Math.random() * funs.length)] : null;
   }
   pickupWeaponBox() {
     var g = this.game;
@@ -2333,18 +2390,35 @@ class PickupManager {
   update(dt) {
     var g = this.game;
     var pp = g.player.pos;
+    if (this.pickupCd > 0) this.pickupCd -= dt;
     for (var i = 0; i < this.boxes.length; i++) {
       var b = this.boxes[i];
       if (!b.active) continue;
       b.t += dt;
       b.group.rotation.y = Math.sin(b.t * 2) * 0.3;
-      if (Math.hypot(pp.x - b.x, pp.z - b.z) < 1.6) this.pickupBox(b);
+      b.group.position.y = Math.sin(b.t * 2.4) * 0.06;        // 浮动
+      if (b.reward) {
+        b.rewardT -= dt;
+        if (b.rewardT <= 0) {                                 // 奖励箱过期消失
+          b.active = false;
+          b.group.visible = false;
+          b.reward = false;
+          continue;
+        }
+      }
+      if (this.pickupCd <= 0 && Math.hypot(pp.x - b.x, pp.z - b.z) < 1.4) {
+        this.pickupBox(b);
+        this.pickupCd = 0.4;
+      }
     }
     if (this.weaponBox && this.weaponBox.active) {
       var wb = this.weaponBox;
       wb.t += dt;
       wb.group.rotation.y = Math.sin(wb.t * 2) * 0.3;
-      if (Math.hypot(pp.x - wb.x, pp.z - wb.z) < 1.6) this.pickupWeaponBox();
+      if (this.pickupCd <= 0 && Math.hypot(pp.x - wb.x, pp.z - wb.z) < 1.4) {
+        this.pickupWeaponBox();
+        this.pickupCd = 0.4;
+      }
     }
   }
   clear() {
@@ -2546,27 +2620,27 @@ class MapBuilder {
     this.pillarMat = new THREE.MeshStandardMaterial({ color: 0xb9c6d6, roughness: 0.3, metalness: 0.6 });
     this.pillarGeo = new THREE.CylinderGeometry(1.6, 1.6, 8, 16);
     this.wallMat = new THREE.MeshStandardMaterial({ color: 0x8b95a8, roughness: 0.9 });
-    this.platformMat = new THREE.MeshStandardMaterial({ color: 0x2b3d52, roughness: 0.85 });
-    this.platformEdgeMat = new THREE.MeshBasicMaterial({ color: 0x35a8ff });
+    this.platformMat = new THREE.MeshStandardMaterial({ color: 0x4a443c, roughness: 0.9 });
+    this.platformEdgeMat = new THREE.MeshBasicMaterial({ color: 0xffb84d });
     this.bridgeMat = new THREE.MeshStandardMaterial({ color: 0x5a6577, roughness: 0.85 });
     // 中央能量核心台（w7+ 制高点，高风险）
-    this.centralMat = new THREE.MeshStandardMaterial({ color: 0x3a2e26, roughness: 0.7, metalness: 0.35 });
+    this.centralMat = new THREE.MeshStandardMaterial({ color: 0x4a443c, roughness: 0.9, metalness: 0.1 });
     this.centralTopTex = makeTex(128, function (g, s) {
       var grad = g.createRadialGradient(s / 2, s / 2, 2, s / 2, s / 2, s / 2);
-      grad.addColorStop(0, 'rgba(255,150,50,0.95)');
-      grad.addColorStop(0.45, 'rgba(255,110,30,0.35)');
-      grad.addColorStop(1, 'rgba(255,90,20,0)');
+      grad.addColorStop(0, 'rgba(180,60,30,0.9)');
+      grad.addColorStop(0.45, 'rgba(140,45,25,0.35)');
+      grad.addColorStop(1, 'rgba(120,40,20,0)');
       g.fillStyle = grad; g.fillRect(0, 0, s, s);
     });
     this.centralTopMat = new THREE.MeshBasicMaterial({ map: this.centralTopTex, transparent: true, depthWrite: false });
-    this.centralEdgeMat = new THREE.MeshBasicMaterial({ color: 0xff9a3d });
+    this.centralEdgeMat = new THREE.MeshBasicMaterial({ color: 0xc8753a });
     // 矮墙顶部黄色警戒条（提示可翻越不可站）
     this.wallStripeMat = new THREE.MeshBasicMaterial({ color: 0xffb84d });
     // 桥洞门框青色发光条
-    this.bridgeGlowMat = new THREE.MeshBasicMaterial({ color: 0x35e0ff });
+    this.bridgeGlowMat = new THREE.MeshBasicMaterial({ color: 0xff5a3d });
     // 出生点引导（绿色箭头 + 圆环）
     this.spawnArrowTex = makeTex(64, function (g, s) {
-      g.fillStyle = 'rgba(61,255,138,0.85)';
+      g.fillStyle = 'rgba(255,200,90,0.9)';
       g.beginPath();
       g.moveTo(s * 0.5, s * 0.1);
       g.lineTo(s * 0.84, s * 0.8);
@@ -2586,14 +2660,14 @@ class MapBuilder {
 
     /* 地面（网格纹理） */
     var groundTex = makeTex(256, function (g, s) {
-      g.fillStyle = '#242c38'; g.fillRect(0, 0, s, s);
-      g.strokeStyle = 'rgba(120,160,200,0.10)'; g.lineWidth = 4;
+      g.fillStyle = '#3a342c'; g.fillRect(0, 0, s, s);
+      g.strokeStyle = 'rgba(210,170,120,0.12)'; g.lineWidth = 4;
       for (var i = 0; i <= s; i += 32) {
         g.beginPath(); g.moveTo(i, 0); g.lineTo(i, s); g.stroke();
         g.beginPath(); g.moveTo(0, i); g.lineTo(s, i); g.stroke();
       }
       for (var k = 0; k < 300; k++) {
-        g.fillStyle = 'rgba(255,255,255,' + (Math.random() * 0.05) + ')';
+        g.fillStyle = 'rgba(235,215,185,' + (Math.random() * 0.06) + ')';
         g.fillRect(Math.random() * s, Math.random() * s, 2, 2);
       }
     });
@@ -2607,12 +2681,12 @@ class MapBuilder {
 
     /* 围墙（砖墙纹理） */
     var brickTex = makeTex(128, function (g, s) {
-      g.fillStyle = '#39404f'; g.fillRect(0, 0, s, s);
+      g.fillStyle = '#453a36'; g.fillRect(0, 0, s, s);
       var bw = 32, bh = 16;
       for (var row = 0; row < 8; row++) {
         for (var col = 0; col < 4; col++) {
           var ox = (row % 2) ? -bw / 2 : 0;
-          g.fillStyle = (row + col) % 2 ? '#464f63' : '#3f4757';
+          g.fillStyle = (row + col) % 2 ? '#54453e' : '#4a3d38';
           g.fillRect(col * bw + ox + 1, row * bh + 1, bw - 2, bh - 2);
         }
       }
@@ -2646,21 +2720,21 @@ class MapBuilder {
 
     /* 中央装饰圆盘（常驻；高台出现后叠加其上） */
     var disc = new THREE.Mesh(new THREE.CircleGeometry(8.4, 48),
-      new THREE.MeshStandardMaterial({ color: 0x182230, roughness: 0.8 }));
+      new THREE.MeshStandardMaterial({ color: 0x3f3a33, roughness: 0.9 }));
     disc.rotation.x = -Math.PI / 2; disc.position.y = 0.015;
     scene.add(disc);
     var ring = new THREE.Mesh(new THREE.RingGeometry(8.4, 9, 48),
-      new THREE.MeshBasicMaterial({ color: 0x1e2a3a, side: THREE.DoubleSide }));
+      new THREE.MeshBasicMaterial({ color: 0x2c2620, side: THREE.DoubleSide }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.02;
     scene.add(ring);
     var glow = new THREE.Mesh(new THREE.TorusGeometry(8.8, 0.06, 8, 64),
-      new THREE.MeshBasicMaterial({ color: 0x35e0ff }));
+      new THREE.MeshBasicMaterial({ color: 0xff5a3d }));
     glow.rotation.x = Math.PI / 2; glow.position.y = 0.05;
     scene.add(glow);
 
     /* 光照：环境 + 半球 + 方向（带阴影）+ 点光源 */
-    scene.add(new THREE.AmbientLight(0x556077, 0.35));
-    scene.add(new THREE.HemisphereLight(0x8fb4ff, 0x2a2118, 0.55));
+    scene.add(new THREE.AmbientLight(0x4a4438, 0.4));
+    scene.add(new THREE.HemisphereLight(0xcfae8a, 0x1c1712, 0.5));
     var sun = new THREE.DirectionalLight(0xfff1dc, 1.15);
     sun.position.set(40, 60, 30);
     sun.castShadow = true;
@@ -2671,12 +2745,12 @@ class MapBuilder {
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
     scene.add(sun);
-    var centerLight = new THREE.PointLight(0xffbb77, 1.6, 45, 1.6);
+    var centerLight = new THREE.PointLight(0xff8844, 1.4, 45, 1.6);
     centerLight.position.set(0, 9, 0);
     scene.add(centerLight);
     var cornerLights = [
-      [-42, 5, -42, 0xff4466, 1.1], [42, 5, 42, 0x33aaff, 1.1],
-      [-42, 5, 42, 0xaa66ff, 0.9], [42, 5, -42, 0x33ff88, 0.9]
+      [-42, 5, -42, 0xffaa66, 1.0], [42, 5, 42, 0xff8855, 1.0],
+      [-42, 5, 42, 0xff7744, 0.9], [42, 5, -42, 0xff6644, 0.9]
     ];
     for (var L = 0; L < cornerLights.length; L++) {
       var cl = new THREE.PointLight(cornerLights[L][3], cornerLights[L][4], 40, 1.7);
@@ -2691,7 +2765,7 @@ class MapBuilder {
     arrow.position.set(0, 0.03, 30);
     scene.add(arrow);
     var spawnRing = new THREE.Mesh(new THREE.RingGeometry(2.6, 3, 40),
-      new THREE.MeshBasicMaterial({ color: 0x3dff8a, transparent: true, opacity: 0.45, side: THREE.DoubleSide }));
+      new THREE.MeshBasicMaterial({ color: 0xffb84d, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
     spawnRing.rotation.x = -Math.PI / 2;
     spawnRing.position.set(0, 0.02, 30);
     scene.add(spawnRing);
@@ -3402,14 +3476,14 @@ class Game {
     // 天空（渐变背景）+ 雾
     var skyTex = makeTex(16, function (g, s) {
       var grad = g.createLinearGradient(0, 0, 0, s);
-      grad.addColorStop(0, '#0b1026');
-      grad.addColorStop(0.55, '#2c3e5c');
-      grad.addColorStop(0.82, '#4a5a72');
-      grad.addColorStop(1, '#2a3446');
+      grad.addColorStop(0, '#14121c');
+      grad.addColorStop(0.55, '#2e2a28');
+      grad.addColorStop(0.82, '#453d35');
+      grad.addColorStop(1, '#211d1a');
       g.fillStyle = grad; g.fillRect(0, 0, s, s);
     });
     this.scene.background = skyTex;
-    this.scene.fog = new THREE.Fog(0x263042, 70, 260);
+    this.scene.fog = new THREE.Fog(0x2a2622, 70, 260);
 
     // 模块
     this.map = new MapBuilder(this);
