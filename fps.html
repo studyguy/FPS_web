@@ -675,26 +675,28 @@ class BulletPool {
       var m = new THREE.Mesh(geo, mat);
       m.visible = false;
       game.scene.add(m);
-      this.pool.push({ mesh: m, pos: new THREE.Vector3(), dir: new THREE.Vector3(), life: 0, active: false });
+      this.pool.push({ mesh: m, pos: new THREE.Vector3(), start: new THREE.Vector3(), dir: new THREE.Vector3(), life: 0, active: false, falloff: null });
     }
     this.ray = new THREE.Raycaster();
     this.speed = 130;
   }
-  fire(pos, dir, dmg, knock) {
+  fire(pos, dir, dmg, knock, falloff) {
     var b = this.pool.find(x => !x.active) || this.pool[0];
     b.active = true;
     b.pos.copy(pos);
+    b.start.copy(pos);
     b.dir.copy(dir);
     b.life = 1.5;
     b.damage = dmg || 34;
     b.knock = knock || 0;
+    b.falloff = falloff || null;
     b.mesh.visible = true;
     b.mesh.position.copy(pos);
     b.mesh.quaternion.setFromUnitVectors(Z_AXIS, dir);
     this.active.push(b);
   }
   /* 霰弹枪：一次发射多颗弹丸（锥形扩散，每颗独立伤害/击退） */
-  fireSpread(pos, dir, count, spread, dmg, knock) {
+  fireSpread(pos, dir, count, spread, dmg, knock, falloff) {
     var right = new THREE.Vector3().crossVectors(dir, UP).normalize();
     var up = new THREE.Vector3().crossVectors(right, dir).normalize();
     for (var i = 0; i < count; i++) {
@@ -702,7 +704,7 @@ class BulletPool {
       var a = Math.random() * Math.PI * 2;
       var r = Math.sqrt(Math.random()) * spread;
       d.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
-      this.fire(pos, d, dmg, knock);
+      this.fire(pos, d, dmg, knock, falloff);
     }
   }
   update(dt, game) {
@@ -739,9 +741,25 @@ class BulletPool {
       if (t.hp <= 0) game.enemies.breakTongue(t);
       return;
     }
-    if (o.userData.enemy) {   // 命中敌人（爆头 2 倍伤害）
+    if (o.userData.enemy) {   // 命中敌人：部位倍率（头/躯干/肢体）× 距离衰减
       var enemy = o.userData.enemy;
-      var dmg = b.damage * (o.userData.head ? 2 : 1);
+      var fo = b.falloff;
+      // 部位倍率（每把枪不同）
+      var partMult = 1;
+      if (fo) {
+        if (o.userData.head) partMult = fo.headMult;
+        else if (o.userData.part === 'limb') partMult = fo.limbMult;
+      }
+      // 距离衰减（出膛到命中距离）
+      var distMult = 1;
+      if (fo && fo.start > 0) {
+        var dist = b.pos.distanceTo(b.start);
+        if (dist > fo.start) {
+          var t = Math.min(1, (dist - fo.start) / Math.max(1, fo.end - fo.start));
+          distMult = 1 - t * (1 - fo.min);
+        }
+      }
+      var dmg = Math.round(b.damage * partMult * distMult);
       enemy.takeDamage(dmg, o.userData.head, game, b.dir);
       game.dmgNumbers.show(hit.point, String(dmg), o.userData.head);
       if (b.knock > 0 && enemy.state === 'active') {
@@ -827,6 +845,7 @@ var WEAPONS = {
     damage: 25, fireRate: 5, magSize: 12, reserve: 0, reserveInf: true,
     reloadTime: 1.2, switchTime: 0.25, staticSpread: 0.003, moveSpread: 0.005,
     heatSpread: 0.0003, adsMult: 0.5, kickP: 0.006, kickY: 0.005, kickMax: 0.05, aimFov: 75, moveMul: 1.0,
+    headMult: 2.0, limbMult: 0.75, falloffStart: 15, falloffEnd: 40, falloffMin: 0.5,
     pellets: 1, knock: 0, auto: false, color: 0x2e333c, dark: 0x1a1e26, accent: 0x8a8f98
   },
   rifle: {
@@ -834,6 +853,7 @@ var WEAPONS = {
     damage: 34, fireRate: 9, magSize: 30, reserve: 150, reserveInf: false,
     reloadTime: 1.6, switchTime: 0.4, staticSpread: 0.006, moveSpread: 0.013,
     heatSpread: 0.0009, adsMult: 0.35, kickP: 0.011, kickY: 0.005, kickMax: 0.1, aimFov: 55, moveMul: 1.0,
+    headMult: 2.0, limbMult: 0.7, falloffStart: 30, falloffEnd: 80, falloffMin: 0.6,
     pellets: 1, knock: 0, auto: true, color: 0x2e333c, dark: 0x191d24, accent: 0xc9562b
   },
   shotgun: {
@@ -841,6 +861,7 @@ var WEAPONS = {
     damage: 13, fireRate: 1.2, magSize: 6, reserve: 36, reserveInf: false,
     reloadTime: 2.4, switchTime: 0.45, staticSpread: 0.045, moveSpread: 0.028,
     heatSpread: 0, adsMult: 0.55, kickP: 0.03, kickY: 0.012, kickMax: 0.16, aimFov: 75, moveMul: 0.9,
+    headMult: 1.5, limbMult: 0.8, falloffStart: 6, falloffEnd: 20, falloffMin: 0.3,
     pellets: 8, knock: 1.2, auto: false, color: 0x3a2c1e, dark: 0x241a10, accent: 0x8a5a2e
   },
   sniper: {
@@ -848,6 +869,7 @@ var WEAPONS = {
     damage: 110, fireRate: 0.9, magSize: 5, reserve: 20, reserveInf: false,
     reloadTime: 2.0, switchTime: 0.5, staticSpread: 0.0005, moveSpread: 0.04,
     heatSpread: 0, adsMult: 0.08, kickP: 0.05, kickY: 0.008, kickMax: 0.22, aimFov: 28, moveMul: 0.85,
+    headMult: 3.0, limbMult: 0.6, falloffStart: 60, falloffEnd: 200, falloffMin: 0.85,
     pellets: 1, knock: 0, auto: false, color: 0x24351f, dark: 0x141f12, accent: 0x5a8a4a
   }
 };
@@ -1119,10 +1141,15 @@ class Weapon {
     var mp = new THREE.Vector3();
     this.muzzle.getWorldPosition(mp);
     var dmg = this.effectiveDamage();
+    // 部位倍率 + 距离衰减参数（每把枪不同）
+    var fo = {
+      headMult: this.cfg.headMult, limbMult: this.cfg.limbMult,
+      start: this.cfg.falloffStart, end: this.cfg.falloffEnd, min: this.cfg.falloffMin
+    };
     if (this.cfg.pellets > 1) {
-      game.bullets.fireSpread(mp, dir, this.cfg.pellets, this.spread, dmg, this.cfg.knock);
+      game.bullets.fireSpread(mp, dir, this.cfg.pellets, this.spread, dmg, this.cfg.knock, fo);
     } else {
-      game.bullets.fire(mp, dir, dmg);
+      game.bullets.fire(mp, dir, dmg, 0, fo);
     }
 
     if (this.ammo === 0) this.reload();   // 打空自动换弹
@@ -1257,18 +1284,24 @@ class Enemy {
     eye.position.set(0, 0.01, 0.18);
     this.head.add(eye);
 
-    // 腿（带枢轴，走路摆动）
+    // 腿（带枢轴，走路摆动；命中部位：肢体）
     var legGeo = new THREE.BoxGeometry(0.24, 0.72, 0.26);
     this.legL = new THREE.Group(); this.legL.position.set(-0.17, 0.74, 0);
     var l1 = new THREE.Mesh(legGeo, matBody); l1.position.y = -0.36; this.legL.add(l1);
+    l1.userData.enemy = this; l1.userData.part = 'limb';
     this.legR = new THREE.Group(); this.legR.position.set(0.17, 0.74, 0);
     var l2 = new THREE.Mesh(legGeo, matBody); l2.position.y = -0.36; this.legR.add(l2);
-    // 手臂
+    l2.userData.enemy = this; l2.userData.part = 'limb';
+    // 手臂（命中部位：肢体）
     var armGeo = new THREE.BoxGeometry(0.2, 0.66, 0.22);
     this.armL = new THREE.Group(); this.armL.position.set(-0.5, 1.3, 0);
     var a1 = new THREE.Mesh(armGeo, matBody); a1.position.y = -0.33; this.armL.add(a1);
+    a1.userData.enemy = this; a1.userData.part = 'limb';
     this.armR = new THREE.Group(); this.armR.position.set(0.5, 1.3, 0);
     var a2 = new THREE.Mesh(armGeo, matBody); a2.position.y = -0.33; this.armR.add(a2);
+    a2.userData.enemy = this; a2.userData.part = 'limb';
+    // 全部命中部位（供子弹目标注册/移除）
+    this.parts = [this.body, this.head, l1, l2, a1, a2];
 
     this.fall.add(this.body, this.head, this.legL, this.legR, this.armL, this.armR);
     this.group.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
@@ -1323,6 +1356,9 @@ class Enemy {
     this.group.position.set(pos.x, 0, pos.z);
     this.fall.rotation.set(0, 0, 0);
     this.fall.position.y = 0;
+    this.legL.rotation.set(0, 0, 0); this.legR.rotation.set(0, 0, 0);
+    this.armL.rotation.set(0, 0, 0); this.armR.rotation.set(0, 0, 0);   // 重置肢体动画（复用实例防残留）
+    this.group.rotation.y = 0;                    // 重置朝向（转身逻辑首帧接管）
     this.state = 'active';
     this.hp = cfg.hp; this.maxHp = cfg.hp;
     this.speed = cfg.speed; this.damage = cfg.damage;
@@ -2019,7 +2055,7 @@ class EnemyManager {
     var pos = this.spawnPos();
     t.activate(pos, 'tank', this.scaleCfg('tank'));
     this.active.push(t);
-    game.bulletTargets.push(t.body, t.head);
+    for (var pi = 0; pi < t.parts.length; pi++) game.bulletTargets.push(t.parts[pi]);
     game.tankActive = t;
     game.showBanner('⚠ 坦克来袭！');
     game.shake = 0.9;
@@ -2199,7 +2235,7 @@ class EnemyManager {
     e.activate(pos, type, this.scaleCfg(type));
     this.active.push(e);
     var game = this.game;
-    game.bulletTargets.push(e.body, e.head);   // 加入子弹命中检测
+    for (var pi = 0; pi < e.parts.length; pi++) game.bulletTargets.push(e.parts[pi]);   // 全部部位加入命中检测
     game.particles.burst(new THREE.Vector3(pos.x, 1, pos.z), 'spark', 8, 3, 0.4); // 出场特效
     return e;
   }
@@ -2207,8 +2243,10 @@ class EnemyManager {
     e.group.visible = false;
     e.state = 'dead';
     var bt = this.game.bulletTargets;
-    var i = bt.indexOf(e.body);
-    if (i >= 0) bt.splice(i, 2);   // body 与 head 相邻
+    for (var pi = 0; pi < e.parts.length; pi++) {
+      var i = bt.indexOf(e.parts[pi]);
+      if (i >= 0) bt.splice(i, 1);
+    }
   }
   separate(e) {
     var pos = e.group.position;
@@ -2256,8 +2294,10 @@ class EnemyManager {
     for (var i = 0; i < this.pool.length; i++) {
       var e = this.pool[i];
       if (e.state !== 'dead') {
-        var k = bt.indexOf(e.body);
-        if (k >= 0) bt.splice(k, 2);
+        for (var pi = 0; pi < e.parts.length; pi++) {
+          var k = bt.indexOf(e.parts[pi]);
+          if (k >= 0) bt.splice(k, 1);
+        }
       }
       e.group.visible = false;
       e.state = 'dead';
@@ -3755,7 +3795,7 @@ class Game {
           if (!e) return null;
           e.activate(new THREE.Vector3(self.player.pos.x + dist, 0, self.player.pos.z), type, m.scaleCfg(type));
           m.active.push(e);
-          self.bulletTargets.push(e.body, e.head);
+          for (var pi = 0; pi < e.parts.length; pi++) self.bulletTargets.push(e.parts[pi]);
         } else {
           e.group.position.set(self.player.pos.x + dist, 0, self.player.pos.z);
         }
@@ -3795,7 +3835,7 @@ class Game {
           e = m.tank;
           e.activate(pos, 'tank', m.scaleCfg('tank'));
           m.active.push(e);
-          self.bulletTargets.push(e.body, e.head);
+          for (var pi = 0; pi < e.parts.length; pi++) self.bulletTargets.push(e.parts[pi]);
           self.tankActive = e;
           self.showBanner('⚠ 坦克来袭！');
           return e;
@@ -3804,7 +3844,7 @@ class Game {
         if (!e) return null;
         e.activate(new THREE.Vector3(self.player.pos.x + dist, 0, self.player.pos.z), type, m.scaleCfg(type));
         m.active.push(e);
-        self.bulletTargets.push(e.body, e.head);
+        for (var pi = 0; pi < e.parts.length; pi++) self.bulletTargets.push(e.parts[pi]);
         self.showToast('已生成：' + ((ENEMY_TYPES[type] || {}).label || type));
         return e;
       },
