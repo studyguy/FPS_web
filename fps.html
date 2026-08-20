@@ -770,28 +770,28 @@ var WEAPONS = {
     damage: 25, fireRate: 5, magSize: 12, reserve: 0, reserveInf: true,
     reloadTime: 1.2, switchTime: 0.25, baseSpread: 0.004, moveSpread: 0.007,
     kickP: 0.006, kickY: 0.005, kickMax: 0.05, aimFov: 75, moveMul: 1.0,
-    pellets: 1, knock: 0, color: 0x2e333c, dark: 0x1a1e26, accent: 0x8a8f98
+    pellets: 1, knock: 0, auto: false, color: 0x2e333c, dark: 0x1a1e26, accent: 0x8a8f98
   },
   rifle: {
     id: 'rifle', name: '步枪', key: 2, unlocked: false, unlockWave: 1,
     damage: 34, fireRate: 9, magSize: 30, reserve: 150, reserveInf: false,
     reloadTime: 1.6, switchTime: 0.4, baseSpread: 0.006, moveSpread: 0.014,
     kickP: 0.011, kickY: 0.005, kickMax: 0.1, aimFov: 55, moveMul: 1.0,
-    pellets: 1, knock: 0, color: 0x2e333c, dark: 0x191d24, accent: 0xc9562b
+    pellets: 1, knock: 0, auto: true, color: 0x2e333c, dark: 0x191d24, accent: 0xc9562b
   },
   shotgun: {
     id: 'shotgun', name: '霰弹枪', key: 3, unlocked: false, unlockWave: 3,
     damage: 13, fireRate: 1.2, magSize: 6, reserve: 36, reserveInf: false,
     reloadTime: 2.4, switchTime: 0.45, baseSpread: 0.05, moveSpread: 0.03,
     kickP: 0.03, kickY: 0.012, kickMax: 0.16, aimFov: 75, moveMul: 0.9,
-    pellets: 8, knock: 1.2, color: 0x3a2c1e, dark: 0x241a10, accent: 0x8a5a2e
+    pellets: 8, knock: 1.2, auto: false, color: 0x3a2c1e, dark: 0x241a10, accent: 0x8a5a2e
   },
   sniper: {
     id: 'sniper', name: '狙击枪', key: 4, unlocked: false, unlockWave: 5,
     damage: 110, fireRate: 0.9, magSize: 5, reserve: 20, reserveInf: false,
     reloadTime: 2.0, switchTime: 0.5, baseSpread: 0.0005, moveSpread: 0.02,
     kickP: 0.05, kickY: 0.008, kickMax: 0.22, aimFov: 28, moveMul: 0.85,
-    pellets: 1, knock: 0, color: 0x24351f, dark: 0x141f12, accent: 0x5a8a4a
+    pellets: 1, knock: 0, auto: false, color: 0x24351f, dark: 0x141f12, accent: 0x5a8a4a
   }
 };
 
@@ -849,6 +849,7 @@ class Weapon {
     this.flashT = 0;
     this.aimFrac = 0;
     this.bobT = 0;
+    this.triggerHeld = false;   // 半自动扳机状态
     // 强化（道具拾取，本局永久，每项 3 级）
     this.dmgMul = 1; this.rateMul = 1; this.magMul = 1; this.spreadMul = 1;
     this.dmgLv = 0; this.rateLv = 0; this.magLv = 0; this.spreadLv = 0;
@@ -935,6 +936,7 @@ class Weapon {
     this.kickPitch = 0; this.kickYaw = 0; this.kick = 0;
     this.flashT = 0; this.flash.visible = false; this.muzzleLight.intensity = 0;
     this.aimFrac = 0;
+    this.triggerHeld = false;
   }
   reload() {
     if (this.reloading || this.ammo === this.effectiveMag()) return;
@@ -946,7 +948,14 @@ class Weapon {
   update(dt, game) {
     // 不要求指针锁定也能射击（无法锁定时仍可瞄准屏幕中心开火）；切枪中禁射
     var canShoot = game.state === 'playing' && !game.weapons.switching;
-    this.firing = canShoot && game.input.mouseLeft;
+    var mouseDown = canShoot && game.input.mouseLeft;
+    if (this.cfg.auto) {
+      this.firing = mouseDown;
+    } else {
+      // 半自动：点击边沿触发（松开后必须重新按下）
+      this.firing = mouseDown && !this.triggerHeld;
+      this.triggerHeld = mouseDown;
+    }
     // 冲刺中开火 → 立即解除冲刺（不锁枪，防软锁）
     if (this.firing) game.player.cancelMoveAction();
 
@@ -1081,6 +1090,7 @@ class WeaponSystem {
     for (var i = 0; i < this.list.length; i++) this.list[i].group.visible = (i === idx);
     w.group.position.y = -0.7;              // 从下方升起
     w.reloading = false;                    // 切枪打断换弹
+    w.fireCd = 0; w.triggerHeld = false;    // 切枪后立即可射（清冷却与半自动扳机）
   }
   cycle(dir) {
     if (this.switching) return;
