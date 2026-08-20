@@ -266,7 +266,8 @@
       </div>
       <div class="row"><span class="lbl">弹药</span><span class="val" id="ammoText">30 / 150</span></div>
       <div class="row"><span class="lbl">分数</span><span class="val" id="scoreText">0</span></div>
-      <div class="row"><span class="lbl">波次</span><span class="val" id="waveText">1</span></div>
+      <div class="row"><span class="lbl">金币</span><span class="val" id="goldText">0</span></div>
+      <div class="row"><span class="lbl">房间</span><span class="val" id="waveText">Ⅰ-1</span></div>
     </div>
   </div>
   <div id="crosshair" style="--spread:8px">
@@ -285,7 +286,7 @@
 <div id="dmgDir"><div class="arc"></div></div>
 <div id="boogerOverlay"></div>
 <div id="stunBar"><span id="stunTxt">连按 空格 挣脱！</span><span class="sb-prog"><i id="stunProg"></i></span></div>
-<div id="bossBarWrap"><div class="boss-lbl">⚠ 坦克</div><div class="boss-bg"><div id="bossBar"></div></div></div>
+<div id="bossBarWrap"><div class="boss-lbl" id="bossLbl">⚠ 大关 Boss</div><div class="boss-bg"><div id="bossBar"></div></div></div>
 <div id="scopeOverlay">
   <div class="scope-ring"></div>
   <div class="scope-line sl1"></div>
@@ -312,8 +313,8 @@
 
 <!-- 开始界面 -->
 <div id="startScreen" class="screen">
-  <h1>FPS 竞技场</h1>
-  <p class="sub">WEB FPS ARENA · THREE.JS</p>
+  <h1>末日地牢</h1>
+  <p class="sub">FPS DUNGEON ROGUELIKE · THREE.JS</p>
   <ul class="controls">
     <li><b>WASD</b> 移动</li>
     <li><b>鼠标</b> 视角</li>
@@ -322,15 +323,13 @@
     <li><b>空格</b> 跳跃（轻点小跳）</li>
     <li><b>Shift</b> 加速跑（消耗耐力）</li>
     <li><b>C</b> 蹲伏（可躲射手弹道）</li>
-    <li><b>R</b> 换弹</li>
+    <li><b>R</b> 换弹 · <b>1~4</b> 切枪</li>
     <li><b>M</b> 声音开关</li>
-    <li><b>方向键</b> 转视角（备用）</li>
   </ul>
   <button id="startBtn" class="btn">点击开始</button>
   <p class="tip">点击后鼠标将被锁定用于控制视角，按 Esc 可暂停</p>
-  <p class="tip" style="color:rgba(150,200,230,.75)">地形随波次变化：低台/跳台可上（近战能打到你）· 矮墙可翻不可站 · 第 7 波中央升起能量高台（小心射手）· 桥洞蹲伏可钻</p>
-  <p class="tip" style="color:rgba(255,180,150,.8)">敌人技能（L4D2 式）：疾行者会飞扑压制（蹲伏可躲，被压连按空格挣脱）· 射手会舌头拉拽（蹲伏/掩体可躲，射断舌头挣脱）· 重装兵会冲锋（引它撞墙会自晕）· 第 8 波起有坦克 Boss（投石可打高台）</p>
-  <p class="tip" style="color:rgba(150,230,180,.85)">武器与道具：除手枪外武器需拾取发光武器箱解锁（W 标记）· 道具箱（? 标记）随机掉落功能道具（F 使用）与武器强化</p>
+  <p class="tip" style="color:rgba(150,230,180,.85)">地牢闯关：清空房间敌人 → 出口解锁（绿色拱门）→ 前进！每大关 4 战斗房 + 补给房 + Boss 房，共 3 大关。死亡即重开，击败敌人收集金币</p>
+  <p class="tip" style="color:rgba(255,180,150,.8)">敌人技能（L4D2 式）：疾行者飞扑压制（蹲伏可躲，连按空格挣脱）· 射手舌头拉拽（射断舌头挣脱）· 重装兵冲锋（引它撞墙自晕）· 大关 Boss 各有威胁</p>
 </div>
 
 <!-- 暂停界面 -->
@@ -348,7 +347,7 @@
 
 <!-- 结束界面 -->
 <div id="gameoverScreen" class="screen hidden">
-  <h1 class="go-title">游戏结束</h1>
+  <h1 class="go-title" id="goTitle">游戏结束</h1>
   <div id="finalStats"></div>
   <button id="restartBtn" class="btn">重新开始</button>
 </div>
@@ -2027,6 +2026,36 @@ function waveComposition(w) {
   return c;
 }
 
+/* ======================= v2.0 地牢模式：大关主题 + 房间表 ======================= */
+/* 每大关：4 战斗房 + 1 补给房 + 1 Boss 房；通关 3 大关即胜利 */
+var ACT_THEME = {
+  1: { name: '废墟巷道', fog: 0x2a2622, hemi: 0xcfae8a, center: 0xff8844, boss: '执刑者', bossScale: 1.0 },
+  2: { name: '焚化工厂', fog: 0x331a10, hemi: 0xd8844a, center: 0xff5522, boss: '焚化巨像', bossScale: 1.5 },
+  3: { name: '血肉巢穴', fog: 0x221030, hemi: 0x9a6ad8, center: 0xbb44ff, boss: '血肉母巢', bossScale: 2.0 }
+};
+/* 每大关 4 个战斗房构成 [突击兵, 疾行者, 重装兵, 射手]；Boss 房单独处理 */
+var ROOM_TABLE = {
+  1: [[5, 1, 0, 0], [6, 2, 0, 0], [7, 2, 1, 0], [8, 3, 1, 1]],
+  2: [[8, 3, 1, 1], [9, 4, 2, 1], [10, 4, 2, 2], [11, 5, 3, 2]],
+  3: [[10, 5, 2, 2], [11, 6, 3, 2], [12, 6, 3, 3], [13, 7, 4, 3]]
+};
+/* 房间构成 → 混编生成列表（洗牌延迟，复用波次节奏） */
+function roomComposition(act, room) {
+  var c = (ROOM_TABLE[act] || ROOM_TABLE[1])[room - 1] || [5, 1, 0, 0];
+  var names = ['grunt', 'runner', 'brute', 'shooter'];
+  var list = [];
+  for (var i = 0; i < 4; i++) for (var k = 0; k < c[i]; k++) list.push(names[i]);
+  for (var j = list.length - 1; j > 0; j--) {
+    var n = Math.floor(Math.random() * (j + 1));
+    var tmp = list[j]; list[j] = list[n]; list[n] = tmp;
+  }
+  return list;
+}
+/* 地牢全局房间序号（1..18）：敌人缩放按此平滑增长 */
+function dungeonLevel(act, room) {
+  return Math.max(1, (act - 1) * 6 + room);
+}
+
 class EnemyManager {
   constructor(game) {
     this.game = game;
@@ -2047,6 +2076,12 @@ class EnemyManager {
     this.spawnTimer = 0;
     this.between = false;
     this.waveDelay = 0;
+    // v2.0 地牢房间模式（与波次模式并存，互不干扰）
+    this.roomMode = false;
+    this.roomSpawnList = [];
+    this.roomSpawnTimer = 0;
+    this.roomAct = 1;
+    this.roomIdx = 1;
   }
   /* Tank 事件波：刷 Boss + 警报 + 震动 */
   spawnTankEvent() {
@@ -2141,10 +2176,10 @@ class EnemyManager {
     t.shooter.attackTimer = t.shooter.cooldown;
     this.removeTongue(t);
   }
-  /** 类型基础数值 × 波次缩放（含 L4D2 融合技能随波增强） */
+  /** 类型基础数值 × 难度缩放（波次模式按 wave，房间模式按全局房间序号） */
   scaleCfg(type) {
     var s = ENEMY_STATS[type] || ENEMY_STATS.grunt;
-    var w = this.wave;
+    var w = this.roomMode ? dungeonLevel(this.roomAct, this.roomIdx) : this.wave;
     var hpMul = Math.min(3.0, 1 + 0.09 * (w - 1));       // 血量（放缓）
     var dmgMul = Math.min(1.6, 1 + 0.045 * (w - 1));     // 伤害（放缓）
     var spd = Math.min(s.speed * 1.5, s.speed + 0.05 * (w - 1)); // 移速
@@ -2219,13 +2254,61 @@ class EnemyManager {
       this.waveDelay -= dt;
       if (this.waveDelay <= 0) { this.between = false; this.startNextWave(); }
     }
+    this.updateEnemies(dt, game, false);
+  }
+  /* 房间模式：按房间清单逐只生成（无自动下一波；清场由 Game 判定） */
+  startRoomCombat(act, room) {
+    this.roomMode = true;
+    this.roomAct = act;
+    this.roomIdx = room;
+    this.roomSpawnList = roomComposition(act, room);
+    this.roomSpawnTimer = 0.3;
+  }
+  /* 房间模式 Boss：生成大关 Boss（复用坦克骨架，按大关缩放） */
+  spawnBoss(act, pos) {
+    var game = this.game;
+    this.roomMode = true;
+    this.roomAct = act;
+    this.roomIdx = 6;
+    var t = this.tank;
+    var cfg = this.scaleCfg('tank');
+    var th = ACT_THEME[act] || ACT_THEME[1];
+    cfg.hp = Math.round(cfg.hp * th.bossScale);
+    cfg.damage = Math.round(cfg.damage * (1 + (act - 1) * 0.15));
+    t.activate(pos, 'tank', cfg);
+    t.applyType('tank');
+    this.active.push(t);
+    for (var pi = 0; pi < t.parts.length; pi++) game.bulletTargets.push(t.parts[pi]);
+    game.tankActive = t;
+    game.bossName = th.boss;
+    game.shake = 0.9;
+  }
+  /* 房间模式更新：生成节奏 + 敌人 AI（dropGold：敌人死亡掉金币） */
+  updateRoomMode(dt, game) {
+    if (this.roomSpawnList.length > 0) {
+      this.roomSpawnTimer -= dt;
+      if (this.roomSpawnTimer <= 0) {
+        this.spawnOne(this.roomSpawnList.shift());
+        this.roomSpawnTimer = 0.35;
+      }
+    }
+    this.updateEnemies(dt, game, true);
+  }
+  /* 敌人 AI + 舌头更新（波次/房间共用）；dropGold 时敌人死亡掉金币 */
+  updateEnemies(dt, game, dropGold) {
     // 更新所有敌人，收集死亡完成的
     var done = [];
     for (var i = this.active.length - 1; i >= 0; i--) {
       var e = this.active[i];
       if (e.update(dt, game)) { done.push(e); this.active.splice(i, 1); }
     }
-    for (var j = 0; j < done.length; j++) this.deactivate(done[j]);
+    for (var j = 0; j < done.length; j++) {
+      if (dropGold && done[j] !== this.tank) {
+        game.spawnGoldAt(done[j].group.position.x, done[j].group.position.z,
+          1 + Math.floor(Math.random() * 3));
+      }
+      this.deactivate(done[j]);
+    }
     this.updateTongues(dt);
   }
   spawnOne(type) {
@@ -2316,6 +2399,9 @@ class EnemyManager {
     this.wave = 0;
     this.spawnList = [];
     this.between = false;
+    this.roomMode = false;
+    this.roomSpawnList = [];
+    this.roomSpawnTimer = 0;
   }
 }
 
@@ -2920,9 +3006,10 @@ class MapBuilder {
     glow.rotation.x = Math.PI / 2; glow.position.y = 0.05;
     scene.add(glow);
 
-    /* 光照：环境 + 半球 + 方向（带阴影）+ 点光源 */
+    /* 光照：环境 + 半球 + 方向（带阴影）+ 点光源（引用保存，供大关主题切换） */
     scene.add(new THREE.AmbientLight(0x4a4438, 0.4));
-    scene.add(new THREE.HemisphereLight(0xcfae8a, 0x1c1712, 0.5));
+    this.hemiLight = new THREE.HemisphereLight(0xcfae8a, 0x1c1712, 0.5);
+    scene.add(this.hemiLight);
     var sun = new THREE.DirectionalLight(0xfff1dc, 1.15);
     sun.position.set(40, 60, 30);
     sun.castShadow = true;
@@ -2933,9 +3020,9 @@ class MapBuilder {
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
     scene.add(sun);
-    var centerLight = new THREE.PointLight(0xff8844, 1.4, 45, 1.6);
-    centerLight.position.set(0, 9, 0);
-    scene.add(centerLight);
+    this.centerLight = new THREE.PointLight(0xff8844, 1.4, 45, 1.6);
+    this.centerLight.position.set(0, 9, 0);
+    scene.add(this.centerLight);
     var cornerLights = [
       [-42, 5, -42, 0xffaa66, 1.0], [42, 5, 42, 0xff8855, 1.0],
       [-42, 5, 42, 0xff7744, 0.9], [42, 5, -42, 0xff6644, 0.9]
@@ -3712,6 +3799,7 @@ class Game {
     this.toast = document.getElementById('toast');
     this.damageOverlay = document.getElementById('damageOverlay');
     this.finalStats = document.getElementById('finalStats');
+    this.goTitle = document.getElementById('goTitle');
     this.diag = document.getElementById('diag');
     this.hitFlashEl = document.getElementById('hitFlash');
     this.staminaBar = document.getElementById('staminaBar');
@@ -3738,10 +3826,20 @@ class Game {
     this.upgCancel = document.getElementById('upgCancel');
     this.upgradeChoice = null;
     this.bossBar = document.getElementById('bossBar');
+    this.bossLbl = document.getElementById('bossLbl');
+    this.goldText = document.getElementById('goldText');
 
     // L4D2 融合状态：胆汁糊屏 / 坦克投石预警圈
     this.boogerFx = 0;
     this.rockWarnT = 0;
+    // v2.0 地牢模式：房间制闯关（'dungeon'）/ 波次生存（'endless'，后续开放）
+    this.mode = 'dungeon';
+    this.gold = 0;
+    this.bossName = '';
+    this.win = false;
+    this.dungeon = { act: 1, room: 1, stage: 'combat', cleared: false, doors: [], doorGroup: null, goldPicks: [] };
+    this.dungeon.doorGroup = new THREE.Group();
+    this.scene.add(this.dungeon.doorGroup);
     this.rockWarnMesh = new THREE.Mesh(new THREE.RingGeometry(1.6, 2, 32),
       new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
     this.rockWarnMesh.rotation.x = -Math.PI / 2;
@@ -4028,6 +4126,11 @@ class Game {
     this.rockWarnMesh.visible = false;
     this.bombProj = null;
     this.bombWarnMesh.visible = false;
+    // v2.0 地牢模式初始化
+    this.mode = 'dungeon';
+    this.gold = 0;
+    this.win = false;
+    this.clearGoldPicks();
     this.state = 'playing';
     this.startScreen.classList.add('hidden');
     this.gameoverScreen.classList.add('hidden');
@@ -4045,7 +4148,7 @@ class Game {
       }
     }, 900);
     this.audio.playStart();
-    this.enemies.startNextWave();
+    this.enterRoom(1, 1);                    // 地牢模式：从第 1 大关第 1 房开始
   }
 
   /* 死亡表现：进入 dying 阶段（慢动作镜头下坠），结束后弹出结算 */
@@ -4063,6 +4166,194 @@ class Game {
     for (var i = 0; i < act.length; i++) bt.push(act[i].body, act[i].head);
     this.bulletTargets = bt;
     this.showToast('地形已更新');
+  }
+
+  /* ======================= v2.0 地牢：房间制闯关 ======================= */
+  /* 进入房间：清场 → 主题 → 重建地形 → 生成敌人/补给/Boss → 建造出口门 */
+  enterRoom(act, room) {
+    var d = this.dungeon;
+    d.act = act; d.room = room;
+    d.cleared = false;
+    this.tankActive = null;
+    this.enemies.reset();                    // 清敌人/舌头/坦克（含 bulletTargets 部位）
+    this.applyTheme(act);
+    this.map.rebuild(act * 100 + room);      // 种子 = act*100+room：同房同图可复现
+    var bt = this.map.coverMeshes.slice();
+    this.bulletTargets = bt;
+    this.clearGoldPicks();
+    this.buildDoors();
+    this.win = false;
+    if (room === 6) {
+      d.stage = 'boss';
+      this.enemies.spawnBoss(act, new THREE.Vector3(0, 0, -26));
+      this.showBanner('⚠ ' + this.bossName + ' 来袭！');
+    } else if (room === 5) {
+      d.stage = 'shop';
+      this.enterShopRoom(act);
+    } else {
+      d.stage = 'combat';
+      this.enemies.startRoomCombat(act, room);
+      this.showBanner((ACT_THEME[act].name) + ' · 房间 ' + room + '/6 清空敌人！');
+    }
+    this.showToast('第 ' + act + ' 大关 · 房间 ' + room + '/6');
+  }
+  /* 大关主题：雾色 / 半球光 / 中央光色调换（末日废墟三幕） */
+  applyTheme(act) {
+    var th = ACT_THEME[act] || ACT_THEME[1];
+    this.scene.fog.color.setHex(th.fog);
+    if (this.map.hemiLight) this.map.hemiLight.color.setHex(th.hemi);
+    if (this.map.centerLight) this.map.centerLight.color.setHex(th.center);
+    this.bossName = th.boss;
+  }
+  /* 补给房（房间 5）：回满血 + 弹药补给 + 奖励道具箱（商店购买 Phase B 扩展） */
+  enterShopRoom(act) {
+    this.player.hp = 100;
+    this.player.dmgTimer = 999;
+    this.weapons.supplyWave();
+    var cur = this.weapon;
+    if (cur.ammo === 0 && cur.reserve > 0) cur.reload();
+    this.pickups.spawnRewardBox(0, 16);
+    this.showBanner('⛽ 补给站：生命与弹药已补满');
+    this.roomCleared();                      // 补给完成即解锁出口
+  }
+  /* 房间清场：解锁出口门 + 清房奖励（每帧由 roomUpdate 判定） */
+  roomCleared() {
+    var d = this.dungeon;
+    if (d.cleared) return;
+    d.cleared = true;
+    for (var i = 0; i < d.doors.length; i++) this.unlockDoor(d.doors[i]);
+    if (d.stage === 'combat') {
+      this.gold += 8;
+      this.showBanner('✓ 房间已清空！走向绿色出口（+8 金币）');
+    } else if (d.stage === 'boss') {
+      this.gold += 30;
+      this.showBanner('🏆 Boss 已击倒！走向出口');
+    } else {
+      this.showBanner('补给完成，走向出口');
+    }
+  }
+  /* 前进：进入下一房间；Boss 房清场后进入下一大关（第 3 大关后通关） */
+  advanceRoom() {
+    var d = this.dungeon;
+    if (!d.cleared) return;
+    if (d.room === 6) {
+      if (d.act >= 3) {
+        this.win = true;
+        this.gameOver(true);
+      } else {
+        this.showBanner('🏆 ' + ACT_THEME[d.act].name + ' 通关！进入下一区域');
+        this.gold += 50;
+        this.enterRoom(d.act + 1, 1);
+      }
+      return;
+    }
+    this.enterRoom(d.act, d.room + 1);
+  }
+  /* 房间模式主更新：清场判定 + 金币拾取 + 出口触发 */
+  roomUpdate(dt) {
+    var d = this.dungeon;
+    var m = this.enemies;
+    if (!d.cleared) {
+      if (d.stage === 'combat') {
+        if (m.roomSpawnList.length === 0 && m.active.length === 0) this.roomCleared();
+      } else if (d.stage === 'boss') {
+        if (!this.tankActive && m.tank.state === 'dead') this.roomCleared();
+      } else {
+        this.roomCleared();                  // 补给房首帧直接解锁
+      }
+    }
+    this.updateGoldPicks(dt);
+    // 清场后：走进任一出口拱门 → 前进
+    if (d.cleared && this.state === 'playing') {
+      for (var i = 0; i < d.doors.length; i++) {
+        var dr = d.doors[i];
+        var dx = this.player.pos.x - dr.x, dz = this.player.pos.z - dr.z;
+        if (dx * dx + dz * dz < 2.6 * 2.6) { this.advanceRoom(); return; }
+      }
+    }
+  }
+  /* ---------- 出口拱门（北/南墙内侧；锁定红 → 解锁绿 + 光柱） ---------- */
+  buildDoors() {
+    var d = this.dungeon;
+    var dg = d.doorGroup;
+    while (dg.children.length) dg.remove(dg.children[0]);
+    d.doors = [];
+    var slots = [[0, -54, 0], [0, 54, 0]];
+    for (var i = 0; i < slots.length; i++) d.doors.push(this.makeDoor(slots[i][0], slots[i][1], slots[i][2]));
+  }
+  makeDoor(x, z, ry) {
+    var g = new THREE.Group();
+    var postMat = new THREE.MeshStandardMaterial({ color: 0x5a2a22, emissive: 0x550000, emissiveIntensity: 0.8 });
+    var p1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4.4, 0.5), postMat);
+    p1.position.set(-1.3, 2.2, 0);
+    var p2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4.4, 0.5), postMat);
+    p2.position.set(1.3, 2.2, 0);
+    var beam = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.5, 0.5), postMat);
+    beam.position.set(0, 4.3, 0);
+    g.add(p1); g.add(p2); g.add(beam);
+    var pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 9, 10),
+      new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.5,
+        blending: THREE.AdditiveBlending, depthWrite: false }));
+    pillar.position.y = 4.5;
+    g.add(pillar);
+    var tip = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff5544 }));
+    tip.position.y = 9;
+    g.add(tip);
+    g.position.set(x, 0, z);
+    g.rotation.y = ry;
+    this.dungeon.doorGroup.add(g);
+    return { g: g, x: x, z: z, ry: ry, unlocked: false, pillar: pillar, tip: tip, posts: [p1, p2, beam] };
+  }
+  unlockDoor(dr) {
+    if (dr.unlocked) return;
+    dr.unlocked = true;
+    for (var i = 0; i < dr.posts.length; i++) {
+      dr.posts[i].material.color.setHex(0x1f5a2e);
+      dr.posts[i].material.emissive.setHex(0x004411);
+    }
+    dr.pillar.material.color.setHex(0x3dff6a);
+    dr.pillar.material.opacity = 0.55;
+    dr.tip.material.color.setHex(0x7dff9a);
+  }
+  /* ---------- 金币：敌人死亡掉落（房间模式） + 拾取 ---------- */
+  spawnGoldAt(x, z, n) {
+    for (var i = 0; i < n; i++) {
+      var m = new THREE.Mesh(new THREE.OctahedronGeometry(0.17, 0),
+        new THREE.MeshStandardMaterial({ color: 0xffd94a, emissive: 0x885500, emissiveIntensity: 0.9,
+          metalness: 0.7, roughness: 0.3 }));
+      m.position.set(x + (Math.random() - 0.5) * 1.2, 0.55, z + (Math.random() - 0.5) * 1.2);
+      this.scene.add(m);
+      this.dungeon.goldPicks.push({ mesh: m, t: Math.random() * 10, v: 1 });
+    }
+  }
+  clearGoldPicks() {
+    var arr = this.dungeon.goldPicks;
+    for (var i = 0; i < arr.length; i++) {
+      this.scene.remove(arr[i].mesh);
+      arr[i].mesh.geometry.dispose();
+      arr[i].mesh.material.dispose();
+    }
+    arr.length = 0;
+  }
+  updateGoldPicks(dt) {
+    var pp = this.player.pos;
+    var arr = this.dungeon.goldPicks;
+    for (var i = arr.length - 1; i >= 0; i--) {
+      var gp = arr[i];
+      gp.t += dt;
+      gp.mesh.rotation.y += dt * 2.4;
+      gp.mesh.position.y = 0.55 + Math.sin(gp.t * 3) * 0.09;
+      var dx = pp.x - gp.mesh.position.x, dz = pp.z - gp.mesh.position.z;
+      if (dx * dx + dz * dz < 1.7 * 1.7) {
+        this.gold += gp.v;
+        this.particles.burst(new THREE.Vector3(gp.mesh.position.x, 1, gp.mesh.position.z), 'spark', 6, 2, 0.3);
+        this.scene.remove(gp.mesh);
+        gp.mesh.geometry.dispose();
+        gp.mesh.material.dispose();
+        arr.splice(i, 1);
+      }
+    }
   }
 
   /* 道具：炸弹（半径 5m AoE） */
@@ -4142,14 +4433,18 @@ class Game {
     this.shake = Math.max(this.shake, 0.3);
   }
 
-  gameOver() {
+  gameOver(win) {
     if (this.state === 'gameover') return;
     this.state = 'gameover';
     if (document.pointerLockElement) document.exitPointerLock();
     this.hud.classList.add('hidden');
-    this.finalStats.innerHTML =
-      '最终分数 <b>' + this.score + '</b>' +
-      '<div class="fs-sub">波次 ' + this.enemies.wave + ' · 击杀 ' + this.kills + '</div>';
+    this.goTitle.textContent = win ? '🎉 通关！' : '游戏结束';
+    this.finalStats.innerHTML = win
+      ? '地牢已征服<b>' + this.score + '</b>' +
+        '<div class="fs-sub">通关 · 击杀 ' + this.kills + ' · 金币 ' + this.gold + '</div>'
+      : '最终分数 <b>' + this.score + '</b>' +
+        '<div class="fs-sub">大关 ' + this.dungeon.act + ' · 房间 ' + this.dungeon.room +
+        ' · 击杀 ' + this.kills + ' · 金币 ' + this.gold + '</div>';
     this.gameoverScreen.classList.remove('hidden');
     this.audio.playGameOver();
   }
@@ -4194,17 +4489,22 @@ class Game {
         this.weapon.update(dt, this);
         this.weapons.update(dt);
         this.bullets.update(dt, this);
-        this.enemies.update(dt, this);
+        if (this.mode === 'dungeon') {
+          this.enemies.updateRoomMode(dt, this);
+          this.roomUpdate(dt);
+        } else {
+          this.enemies.update(dt, this);
+          if (this.time - this.lastMidPickupT > 20) {
+            this.lastMidPickupT = this.time;
+            this.pickups.refreshMidWave();
+          }
+        }
         this.shots.update(dt, this);
         this.particles.update(dt);
         this.pickups.update(dt);
         this.dmgNumbers.update(dt);
         this.updateBomb(dt);
         this.itemShots.update(dt, this);
-        if (this.time - this.lastMidPickupT > 20) {
-          this.lastMidPickupT = this.time;
-          this.pickups.refreshMidWave();
-        }
 
         // 相机：视角 = yaw/pitch + 后坐力；镜头抖动
         var cam = this.camera;
@@ -4299,7 +4599,12 @@ class Game {
       this.ammoText.classList.remove('reloading');
     }
     this.scoreText.textContent = this.score;
-    this.waveText.textContent = '第 ' + this.enemies.wave + ' 波';
+    this.goldText.textContent = this.gold;
+    // 地牢模式：大关（罗马数字）· 房间进度；波次模式：第 N 波
+    var d = this.dungeon;
+    this.waveText.textContent = this.mode === 'dungeon'
+      ? (['Ⅰ', 'Ⅱ', 'Ⅲ'][d.act - 1] || d.act) + '-' + d.room + (d.stage === 'boss' ? ' ⚠' : '')
+      : '第 ' + this.enemies.wave + ' 波';
     // 受击红晕 + 低血量脉动（纯视觉心跳）
     var lowHp = p.hp > 0 && p.hp <= PlayerConfig.LOW_HP;
     var pulse = lowHp ? 0.14 + Math.sin(this.time * 6) * 0.07 : 0;
@@ -4337,6 +4642,7 @@ class Game {
     if (this.tankActive && this.tankActive.state === 'active') {
       this.bossBarWrap.classList.add('show');
       this.bossBar.style.width = Math.max(0, this.tankActive.hp / this.tankActive.maxHp * 100).toFixed(1) + '%';
+      this.bossLbl.textContent = '⚠ ' + (this.bossName || '大关 Boss');
     } else this.bossBarWrap.classList.remove('show');
     // 武器栏（解锁/弹药/强化等级/当前高亮）
     var ws = this.weapons.list;
