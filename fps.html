@@ -117,6 +117,14 @@
   #scopeOverlay .sl1 { width: 2px; height: 100%; transform: translateX(-50%); }
   #scopeOverlay .sl2 { height: 2px; width: 100%; transform: translateY(-50%); }
   body.scoped #crosshair { display: none; }
+
+  /* 伤害跳字（统一伤害显示：命中点弹出，爆头黄色大字） */
+  #dmgNumLayer { position: fixed; inset: 0; z-index: 50; pointer-events: none; overflow: hidden; }
+  .dmg-num { position: absolute; transform: translate(-50%, -50%); font-size: 15px; font-weight: 800;
+    color: #fff; text-shadow: 0 0 3px #000, 0 0 8px rgba(0,0,0,.8); opacity: 0;
+    font-variant-numeric: tabular-nums; will-change: left, top, opacity; }
+  .dmg-num.head { color: #ffd94a; font-size: 24px;
+    text-shadow: 0 0 6px rgba(255,180,40,.95), 0 0 14px #000; }
   #ammoText { min-width: 74px; text-align: right; }
   #ammoText.reloading { color: #ffb84d; }
 
@@ -246,6 +254,7 @@
 <div id="stunBar">连按 空格 挣脱！<span class="sb-prog"><i id="stunProg"></i></span></div>
 <div id="bossBarWrap"><div class="boss-lbl">⚠ 坦克</div><div class="boss-bg"><div id="bossBar"></div></div></div>
 <div id="scopeOverlay"><div class="scope-line sl1"></div><div class="scope-line sl2"></div></div>
+<div id="dmgNumLayer"></div>
 <div id="weaponBar">
   <div class="wslot" id="wslot0"><span class="wkey">1</span><span class="wname">手枪</span><span class="wammo"></span><span class="wup"></span></div>
   <div class="wslot" id="wslot1"><span class="wkey">2</span><span class="wname">步枪</span><span class="wammo"></span><span class="wup"></span></div>
@@ -687,6 +696,7 @@ class BulletPool {
       var enemy = o.userData.enemy;
       var dmg = b.damage * (o.userData.head ? 2 : 1);
       enemy.takeDamage(dmg, o.userData.head, game, b.dir);
+      game.dmgNumbers.show(hit.point, String(dmg), o.userData.head);
       if (b.knock > 0 && enemy.state === 'active') {
         enemy.group.position.x += b.dir.x * b.knock;   // 霰弹击退（仅水平）
         enemy.group.position.z += b.dir.z * b.knock;
@@ -2207,6 +2217,62 @@ var ITEMS = {
   upSpread: { name: '精准强化', icon: '🎯', wave: 3, fun: false, kind: 'spread' }
 };
 
+/* ======================= 伤害跳字（统一伤害显示） ======================= */
+class DamageNumbers {
+  constructor(game) {
+    this.game = game;
+    this.pool = [];
+    this.active = [];
+    this.layer = document.getElementById('dmgNumLayer');
+    for (var i = 0; i < 24; i++) {
+      var el = document.createElement('span');
+      el.className = 'dmg-num';
+      this.layer.appendChild(el);
+      this.pool.push({ el: el, world: new THREE.Vector3(), life: 0, maxLife: 0.7, active: false });
+    }
+    this._v = new THREE.Vector3();
+  }
+  /* 在命中点显示伤害数字（head=true 爆头黄色大字） */
+  show(world, text, head) {
+    var d = this.pool.find(x => !x.active) || this.pool[0];
+    d.active = true;
+    d.world.copy(world);
+    d.life = d.maxLife = 0.7;
+    d.el.textContent = text;
+    d.el.classList.toggle('head', !!head);
+    d.el.style.opacity = '1';
+    if (this.active.indexOf(d) < 0) this.active.push(d);
+  }
+  update(dt) {
+    var cam = this.game.camera;
+    var w = innerWidth, h = innerHeight;
+    for (var i = this.active.length - 1; i >= 0; i--) {
+      var d = this.active[i];
+      d.life -= dt;
+      if (d.life <= 0) {
+        d.active = false;
+        d.el.style.opacity = '0';
+        this.active.splice(i, 1);
+        continue;
+      }
+      // 世界坐标 → 屏幕坐标（跟随镜头），并随生命期上浮淡出
+      this._v.copy(d.world).project(cam);
+      if (this._v.z > 1) { d.active = false; d.el.style.opacity = '0'; this.active.splice(i, 1); continue; }   // 在身后
+      var rise = (1 - d.life / d.maxLife) * 38;
+      d.el.style.left = ((this._v.x * 0.5 + 0.5) * w) + 'px';
+      d.el.style.top = ((-this._v.y * 0.5 + 0.5) * h - rise) + 'px';
+      d.el.style.opacity = Math.min(1, d.life / (d.maxLife * 0.55)).toFixed(2);
+    }
+  }
+  clear() {
+    for (var i = 0; i < this.pool.length; i++) {
+      this.pool[i].active = false;
+      this.pool[i].el.style.opacity = '0';
+    }
+    this.active.length = 0;
+  }
+}
+
 /* ======================= 道具箱 / 武器箱（拾取管理器） ======================= */
 class PickupManager {
   constructor(game) {
@@ -2517,6 +2583,7 @@ class ItemShotPool {
       }
       if (hitEnemy) {
         hitEnemy.takeDamage(b.dmg, false, game, b.dir);
+        game.dmgNumbers.show(b.pos, String(b.dmg), false);
         game.particles.burst(b.pos, 'flash', 8, 3, 0.35);
         this.recycle(b, i);
       }
@@ -3493,6 +3560,7 @@ class Game {
     this.bullets = new BulletPool(this);
     this.itemShots = new ItemShotPool(this);   // 道具弹（直线/追踪）
     this.pickups = new PickupManager(this);   // 道具箱/武器箱
+    this.dmgNumbers = new DamageNumbers(this); // 伤害跳字
     this.lastMidPickupT = 0;
     this.particles = new ParticlePool(this);
     this.shots = new EnemyShotPool(this);   // 敌人弹幕（射手光球），须先于 EnemyManager
@@ -3752,6 +3820,7 @@ class Game {
     this.player.reset();
     this.weapons.reset();
     this.pickups.clear();
+    this.dmgNumbers.clear();
     this.itemShots.resetAll();
     this.player.item = null;
     this.lastMidPickupT = 0;
@@ -3816,6 +3885,7 @@ class Game {
       if (e.state !== 'active') continue;
       if (Math.hypot(e.group.position.x - pp.x, e.group.position.z - pp.z) < 5) {
         e.takeDamage(80, false, this, null);
+        this.dmgNumbers.show(e.group.position, '80', false);
         n++;
       }
     }
@@ -3828,6 +3898,7 @@ class Game {
       var e = this.enemies.active[i];
       if (e.state !== 'active') continue;
       e.takeDamage(50, false, this, null);
+      this.dmgNumbers.show(e.group.position, '50', false);
       e.speedMul = 0.5; e.speedMulT = 4;
       n++;
     }
@@ -3891,6 +3962,7 @@ class Game {
         this.shots.update(dt, this);
         this.particles.update(dt);
         this.pickups.update(dt);
+        this.dmgNumbers.update(dt);
         this.itemShots.update(dt, this);
         if (this.time - this.lastMidPickupT > 20) {
           this.lastMidPickupT = this.time;
