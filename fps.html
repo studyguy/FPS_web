@@ -1883,8 +1883,8 @@ var PlayerConfig = {
   MELEE_HEIGHT_GAP: 0.8,   // 近战可命中的高度差上限（平台上防隔空打）
   // 死亡镜头
   DEATH_CAM_TIME: 0.9,
-  // 灵敏度
-  SENS_MIN: 0.5, SENS_MAX: 6.0, SENS_STEP: 0.2, SENS_DEFAULT: 2.1
+  // 灵敏度（档位锚定 0.2 网格：0.4 / 0.6 / ... / 1.0 / 2.0 / ... / 6.0）
+  SENS_MIN: 0.4, SENS_MAX: 6.0, SENS_STEP: 0.2, SENS_DEFAULT: 2.0
 };
 
 /* ======================= 玩家（移动 / 耐力 / 蹲伏 / 跳跃 / 生命） ======================= */
@@ -2202,11 +2202,14 @@ class Game {
     this.sensMinus = document.getElementById('sensMinus');
     this.sensPlus = document.getElementById('sensPlus');
 
-    // 鼠标灵敏度（localStorage 持久化，隐私模式降级为默认值）
+    // 鼠标灵敏度（localStorage 持久化，隐私模式降级为默认值；旧值吸附到 0.2 档位网格）
     this.sens = PlayerConfig.SENS_DEFAULT;
     try {
       var saved = parseFloat(localStorage.getItem('fps_sensitivity'));
-      if (isFinite(saved)) this.sens = clamp(saved, PlayerConfig.SENS_MIN, PlayerConfig.SENS_MAX);
+      if (isFinite(saved)) {
+        this.sens = clamp(Math.round(saved / PlayerConfig.SENS_STEP) * PlayerConfig.SENS_STEP,
+          PlayerConfig.SENS_MIN, PlayerConfig.SENS_MAX);
+      }
     } catch (e) { /* 忽略 */ }
     this.sensVal.textContent = this.sens.toFixed(1);
 
@@ -2253,7 +2256,8 @@ class Game {
         self.showToast(self.player.god ? '无敌模式开启（再输入一次关闭）' : '无敌模式关闭');
       },
       setSens: function (v) {
-        self.sens = clamp(v, PlayerConfig.SENS_MIN, PlayerConfig.SENS_MAX);
+        self.sens = clamp(Math.round(v / PlayerConfig.SENS_STEP) * PlayerConfig.SENS_STEP,
+          PlayerConfig.SENS_MIN, PlayerConfig.SENS_MAX);
         self.sensVal.textContent = self.sens.toFixed(1);
         try { localStorage.setItem('fps_sensitivity', String(self.sens)); } catch (e) { /* 忽略 */ }
       },
