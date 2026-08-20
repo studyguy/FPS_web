@@ -7,7 +7,7 @@
 ```bash
 # 1) 安装 Git for Windows（https://git-scm.com/download/win），一路默认即可
 # 2) 克隆仓库（首次推送时会弹浏览器登录 GitHub，凭据由 Git Credential Manager 自动管理）
-git clone https://github.com/studyguy/FPS_web.git
+git clone https://github.com/studyguy/doom-dungeon.git
 # 3) 配置提交身份（与 GitHub 账号一致）
 git config --global user.name "Rodger"
 git config --global user.email "faith.yrj@gmail.com"

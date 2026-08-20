@@ -1,9 +1,11 @@
-# FPS 竞技场（Web FPS Arena）
+# 末日地牢（Doom Dungeon）
 
-网页版第一人称射击游戏：**单个 HTML 文件 + 本地 Three.js 库**，无需构建工具，双击即可运行。
+网页版第一人称射击地牢 Roguelike：**单个 HTML 文件 + 本地 Three.js 库**，无需构建工具，双击即可运行。
 
-- 🔗 在线试玩：https://studyguy.github.io/FPS_web/
-- 📁 本仓库：https://github.com/studyguy/FPS_web
+以元气骑士为蓝本的房间制闯关：3 大关 ×（4 战斗房 + 补给房 + Boss 房），清空房间解锁出口、收集金币、挑战层层 Boss。
+
+- 🔗 在线试玩：https://studyguy.github.io/doom-dungeon/
+- 📁 本仓库：https://github.com/studyguy/doom-dungeon
 
 ## ✨ 特性
 
@@ -38,7 +40,7 @@
 |---|---|
 | 直接游玩 | 双击 `fps.html`（现代浏览器均可，`three.min.js` 为本地兜底，离线可用） |
 | 本地服务器 | `python -m http.server 8123` 后访问 http://127.0.0.1:8123/fps.html |
-| 在线游玩 | https://studyguy.github.io/FPS_web/ （GitHub Pages 自动部署 main 分支） |
+| 在线游玩 | https://studyguy.github.io/doom-dungeon/ （GitHub Pages 自动部署 main 分支） |
 
 ## 🎮 操作
 
@@ -63,7 +65,7 @@
 ## 📁 文件结构
 
 ```
-FPS_web/
+doom-dungeon/
 ├── fps.html            # 游戏全部代码（HTML + CSS + JS 单文件）
 ├── three.min.js        # Three.js r152 本地兜底（加载失败时自动回退多个 CDN）
 ├── index.html          # GitHub Pages 根路径入口（跳转到 fps.html）
