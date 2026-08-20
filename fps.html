@@ -137,6 +137,20 @@
   #scopeOverlay .tk4 { transform: translate(calc(21.2vmin - 13px), -50%) rotate(90deg); }
   body.scoped #crosshair { display: none; }
 
+  /* 强化替换选择弹窗 */
+  #upgPanel { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
+    background: rgba(4,6,10,.78); }
+  #upgPanel.hidden { display: none; }
+  .upg-box { background: rgba(12,18,28,.96); border: 1px solid rgba(255,200,90,.45); border-radius: 14px;
+    padding: 22px 28px; text-align: center; min-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+  .upg-title { color: #ffd94a; font-size: 17px; font-weight: 800; letter-spacing: 1px; margin-bottom: 14px; }
+  .upg-sub { color: #9fc3e8; font-size: 13px; margin-bottom: 14px; }
+  #upgList { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .upg-btn { font-size: 15px; font-weight: 700; color: #141a26; background: linear-gradient(180deg,#ffd97a,#ff9a3d);
+    border: none; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
+  .upg-btn:hover { transform: scale(1.03); }
+  .upg-cancel { margin-top: 4px; font-size: 14px; padding: 8px 30px; opacity: .85; }
+
   /* 伤害跳字（统一伤害显示：命中点弹出，爆头黄色大字） */
   #dmgNumLayer { position: fixed; inset: 0; z-index: 50; pointer-events: none; overflow: hidden; }
   .dmg-num { position: absolute; transform: translate(-50%, -50%); font-size: 15px; font-weight: 800;
@@ -287,6 +301,14 @@
   <div class="wslot" id="wslot3"><span class="wkey">4</span><span class="wname">狙击枪</span><span class="wammo"></span><span class="wup"></span></div>
 </div>
 <div id="itemSlot" class="empty"><div class="is-title">道具</div><div class="is-name">—</div><div class="is-hint">按 F 使用</div></div>
+<div id="upgPanel" class="hidden">
+  <div class="upg-box">
+    <div class="upg-title">强化槽已满</div>
+    <div class="upg-sub">选择要替换的现有强化（新强化将替代它）：</div>
+    <div id="upgList"></div>
+    <button id="upgCancel" class="btn upg-cancel">放弃</button>
+  </div>
+</div>
 
 <!-- 开始界面 -->
 <div id="startScreen" class="screen">
@@ -888,6 +910,8 @@ class Weapon {
     // 强化（道具拾取，本局永久，每项 3 级）
     this.dmgMul = 1; this.rateMul = 1; this.magMul = 1; this.spreadMul = 1;
     this.dmgLv = 0; this.rateLv = 0; this.magLv = 0; this.spreadLv = 0;
+    this.slots = [];              // 已装配的强化种类（最多 maxSlots 个）
+    this.maxSlots = 2;            // 强化槽上限：满槽拾取新强化需替换
   }
   /* 第一人称模型（方块拼装，按武器类型区分造型） */
   buildModel(cfg) {
@@ -941,27 +965,42 @@ class Weapon {
   effectiveRate() { return this.cfg.fireRate * this.rateMul; }
   effectiveMag() { return Math.round(this.cfg.magSize * this.magMul); }
   /* 增强道具：对当前武器永久强化（3 级上限，满级转弹药） */
+  /* 强化等级读写（4 种强化共享乘数逻辑） */
+  kindLv(kind) {
+    if (kind === 'dmg') return this.dmgLv;
+    if (kind === 'rate') return this.rateLv;
+    if (kind === 'mag') return this.magLv;
+    return this.spreadLv;
+  }
+  setKindLv(kind, v) {
+    if (kind === 'dmg') { this.dmgLv = v; this.dmgMul = 1 + 0.2 * v; }
+    else if (kind === 'rate') { this.rateLv = v; this.rateMul = 1 + 0.15 * v; }
+    else if (kind === 'mag') {
+      this.magLv = v; this.magMul = 1 + 0.5 * v;
+      if (this.ammo === 0) this.ammo = this.effectiveMag();
+    }
+    else { this.spreadLv = v; this.spreadMul = Math.pow(0.7, v); }
+  }
+  /* 强化道具：同种升级（3 级封顶） / 空槽装配 / 槽满返回 'needChoice' 由玩家选择替换 */
   upgrade(kind) {
     var game = this.game;
     var names = { dmg: '伤害强化', rate: '射速强化', mag: '扩容弹匣', spread: '精准强化' };
-    var ok = false;
-    if (kind === 'dmg' && this.dmgLv < 3) { this.dmgLv++; this.dmgMul = 1 + 0.2 * this.dmgLv; ok = true; }
-    else if (kind === 'rate' && this.rateLv < 3) { this.rateLv++; this.rateMul = 1 + 0.15 * this.rateLv; ok = true; }
-    else if (kind === 'mag' && this.magLv < 3) {
-      this.magLv++; this.magMul = 1 + 0.5 * this.magLv;
-      if (this.ammo === 0) this.ammo = this.effectiveMag();
-      ok = true;
-    }
-    else if (kind === 'spread' && this.spreadLv < 3) { this.spreadLv++; this.spreadMul = Math.pow(0.7, this.spreadLv); ok = true; }
-    if (ok) {
-      var lv = kind === 'dmg' ? this.dmgLv : kind === 'rate' ? this.rateLv : kind === 'mag' ? this.magLv : this.spreadLv;
-      game.showBanner(names[kind] + ' +' + lv + '（' + this.name + '）');
-    }
-    if (!ok) {
+    if (this.slots.indexOf(kind) >= 0) {
+      if (this.kindLv(kind) < 3) {
+        this.setKindLv(kind, this.kindLv(kind) + 1);
+        game.showBanner(names[kind] + ' +' + this.kindLv(kind) + '（' + this.name + '）');
+        return 'ok';
+      }
       // 满级 → 转弹药
       this.reserve = Math.min(999, this.reserve + this.effectiveMag() * 2);
       game.showToast(this.name + ' 该强化已满级，转为弹药补给');
+      return 'full';
     }
+    if (this.slots.length >= this.maxSlots) return 'needChoice';   // 槽满 → 玩家选择替换
+    this.slots.push(kind);
+    this.setKindLv(kind, 1);
+    game.showBanner(names[kind] + ' +1（' + this.name + '）');
+    return 'ok';
   }
   reset() {
     this.ammo = this.magSize;
@@ -972,6 +1011,7 @@ class Weapon {
     this.flashT = 0; this.flash.visible = false; this.muzzleLight.intensity = 0;
     this.aimFrac = 0;
     this.triggerHeld = false;
+    this.slots = [];
   }
   reload() {
     if (this.reloading || this.ammo === this.effectiveMag()) return;
@@ -2463,7 +2503,8 @@ class PickupManager {
       g.player.item = item;
       g.showToast('拾取道具：' + cfg.icon + ' ' + cfg.name + '（按 F 使用）');
     } else {
-      g.weapon.upgrade(cfg.kind);
+      var res = g.weapon.upgrade(cfg.kind);
+      if (res === 'needChoice') g.openUpgradeChoice(g.weapon, cfg.kind);
     }
     g.particles.burst(new THREE.Vector3(box.x, 1, box.z), 'flash', 8, 2.5, 0.4);
   }
@@ -3652,6 +3693,10 @@ class Game {
     ];
     this.itemSlot = document.getElementById('itemSlot');
     this.scopeOverlay = document.getElementById('scopeOverlay');
+    this.upgPanel = document.getElementById('upgPanel');
+    this.upgList = document.getElementById('upgList');
+    this.upgCancel = document.getElementById('upgCancel');
+    this.upgradeChoice = null;
     this.bossBar = document.getElementById('bossBar');
 
     // L4D2 融合状态：胆汁糊屏 / 坦克投石预警圈
@@ -3856,8 +3901,49 @@ class Game {
       self.handleWheel(e.deltaY);
     }, { passive: true });
     self.sensPlus.addEventListener('click', function () { self.changeSens(1); });
+    self.upgCancel.addEventListener('click', function () { self.applyUpgradeChoice(-1); });
   }
 
+  /* 强化槽满：打开替换选择弹窗（游戏冻结等待选择） */
+  openUpgradeChoice(weapon, newKind) {
+    var self = this;
+    this.upgradeChoice = { weapon: weapon, kind: newKind };
+    var list = this.upgList;
+    list.innerHTML = '';
+    var names = { dmg: '伤害强化', rate: '射速强化', mag: '扩容弹匣', spread: '精准强化' };
+    var icons = { dmg: '⚡', rate: '🔧', mag: '📦', spread: '🎯' };
+    for (var i = 0; i < weapon.slots.length; i++) {
+      var k = weapon.slots[i];
+      (function (idx) {
+        var btn = document.createElement('button');
+        btn.className = 'upg-btn';
+        btn.textContent = icons[k] + ' ' + names[k] + ' ' + weapon.kindLv(k) + '级';
+        btn.addEventListener('click', function () { self.applyUpgradeChoice(idx); });
+        list.appendChild(btn);
+      })(i);
+    }
+    this.upgPanel.classList.remove('hidden');
+    this.state = 'choosing';   // 世界冻结，等待选择
+  }
+  /* 应用替换选择：idx 为现有槽索引，-1 为放弃 */
+  applyUpgradeChoice(idx) {
+    var uc = this.upgradeChoice;
+    if (!uc) return;
+    var w = uc.weapon, newKind = uc.kind;
+    var names = { dmg: '伤害强化', rate: '射速强化', mag: '扩容弹匣', spread: '精准强化' };
+    if (idx >= 0 && idx < w.slots.length) {
+      var oldKind = w.slots[idx];
+      w.setKindLv(oldKind, 0);
+      w.slots[idx] = newKind;
+      w.setKindLv(newKind, 1);
+      this.showBanner('强化替换：' + names[newKind] + ' 已装配');
+    } else {
+      this.showToast('已放弃强化道具');
+    }
+    this.upgradeChoice = null;
+    this.upgPanel.classList.add('hidden');
+    this.state = 'playing';
+  }
   /* 滚轮逐格切换：累积 delta 超过阈值才切一把；切换后 100ms 内忽略（合并同批事件） */
   handleWheel(deltaY) {
     var now = performance.now();
@@ -4133,6 +4219,8 @@ class Game {
         }
         this.updateHud();
         this.input.clearPressed();
+      } else if (this.state === 'choosing') {
+        // 强化替换选择中：世界冻结（仅渲染）
       } else if (this.state === 'dying') {
         // 死亡表现：0.9s 慢动作镜头（敌人/子弹冻结，仅镜头动画 + 红黑渐晕）
         this.dyingT += this.dt;
