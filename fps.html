@@ -1254,6 +1254,29 @@ var ENEMY_TYPES = {
   shooter: { scale: 1.0, body: 0x5a2a8f, head: 0x46206e, eye: 0x00ccff, label: '射手' },
   tank:    { scale: 2.2, body: 0x5c1f1f, head: 0x3f1313, eye: 0xff4400, label: '坦克' }
 };
+/* v2.0 外观差异化：装饰部件共享材质（按类型派生，受击闪红只作用于主材质） */
+var DECO_MATS = (function () {
+  var m = {};
+  var types = ['grunt', 'runner', 'shooter', 'brute', 'tank'];
+  for (var i = 0; i < types.length; i++) {
+    var t = ENEMY_TYPES[types[i]];
+    m[types[i]] = {
+      main: new THREE.MeshStandardMaterial({ color: t.body, roughness: 0.75, metalness: 0.1 }),
+      dark: new THREE.MeshStandardMaterial({ color: t.head, roughness: 0.7, metalness: 0.1 })
+    };
+  }
+  return m;
+})();
+/* 体型变体（body/head/limb 部件缩放；命中盒随外观一致变化） */
+var BODY_VARIANTS = {
+  grunt:   { body: [1, 1, 1], head: [1, 1, 1], limb: [1, 1, 1] },
+  runner:  { body: [0.75, 1.18, 0.8], head: [0.85, 1.05, 0.85], limb: [0.7, 1, 0.7] },
+  shooter: { body: [0.95, 1, 0.95], head: [1.35, 1.0, 1.4], limb: [1, 1, 1] },
+  brute:   { body: [1.32, 0.92, 1.22], head: [1.15, 0.95, 1.15], limb: [1.18, 1, 1.18] },
+  tank:    { body: [1.35, 1.25, 1.3], head: [1.25, 1.2, 1.25], limb: [1.28, 1, 1.28] }
+};
+/* 装饰用单位几何（mesh.scale 变形，避免重复建几何） */
+var DECO_UNIT = { box: new THREE.BoxGeometry(1, 1, 1), cone: new THREE.ConeGeometry(0.5, 1, 8) };
 
 class Enemy {
   constructor() {
@@ -1302,6 +1325,67 @@ class Enemy {
     // 全部命中部位（供子弹目标注册/移除）
     this.parts = [this.body, this.head, l1, l2, a1, a2];
 
+    /* v2.0 外观差异化：按类型构建装饰部件（挂 fall，applyType 切换可见；不参与命中） */
+    this.deco = {};
+    var self = this;
+    function decoGroup(type, build) {
+      var g = new THREE.Group();
+      g.visible = false;
+      build(g);
+      self.fall.add(g);
+      self.deco[type] = g;
+    }
+    function decoBox(g, mat, s, pos, rot) {
+      var m = new THREE.Mesh(DECO_UNIT.box, mat);
+      m.scale.set(s[0], s[1], s[2]);
+      m.position.set(pos[0], pos[1], pos[2]);
+      if (rot) { m.rotation.x = rot[0]; m.rotation.y = rot[1]; m.rotation.z = rot[2]; }
+      g.add(m);
+      return m;
+    }
+    function decoCone(g, mat, s, pos, rot) {
+      var m = new THREE.Mesh(DECO_UNIT.cone, mat);
+      m.scale.set(s[0], s[1], s[2]);
+      m.position.set(pos[0], pos[1], pos[2]);
+      if (rot) { m.rotation.z = rot[2]; m.rotation.x = rot[0]; }
+      g.add(m);
+      return m;
+    }
+    // 突击兵：破布头巾（头顶斜片 + 后飘布条）
+    decoGroup('grunt', function (g) {
+      var md = DECO_MATS.grunt.dark;
+      decoBox(g, md, [0.42, 0.08, 0.4], [0, 1.84, 0], [0, 0, 0.12]);
+      decoBox(g, md, [0.09, 0.02, 0.32], [0, 1.88, 0.18], [0.42, 0, 0]);
+    });
+    // 疾行者：背鳍（速度感，冲刺时方向感）
+    decoGroup('runner', function (g) {
+      var m = DECO_MATS.runner.main;
+      decoBox(g, m, [0.06, 0.95, 0.5], [0, 1.55, -0.34], [-0.25, 0, 0]);
+      decoBox(g, m, [0.05, 0.5, 0.3], [0, 1.02, -0.32], [-0.42, 0, 0]);
+    });
+    // 射手：大头 + 前伸长嘴（吐舌来源）+ 背后披风
+    decoGroup('shooter', function (g) {
+      var m = DECO_MATS.shooter.main, md = DECO_MATS.shooter.dark;
+      decoBox(g, md, [0.26, 0.17, 0.52], [0, 1.53, 0.27]);
+      decoBox(g, m, [0.92, 1.35, 0.09], [0, 0.85, -0.32], [0.12, 0, 0]);
+    });
+    // 重装兵：头盔帽檐 + 双肩甲（冲锋时的厚重感）
+    decoGroup('brute', function (g) {
+      var m = DECO_MATS.brute.main, md = DECO_MATS.brute.dark;
+      decoBox(g, md, [0.55, 0.16, 0.52], [0, 1.86, 0], [0.16, 0, 0]);
+      decoBox(g, m, [0.34, 0.26, 0.42], [-0.52, 1.55, 0], [0, 0, 0.32]);
+      decoBox(g, m, [0.34, 0.26, 0.42], [0.52, 1.55, 0], [0, 0, -0.32]);
+    });
+    // 坦克：双角 + 胸甲 + 肩刺（Boss 压迫感）
+    decoGroup('tank', function (g) {
+      var m = DECO_MATS.tank.main, md = DECO_MATS.tank.dark;
+      decoCone(g, md, [0.3, 0.6, 0.3], [-0.24, 2.12, 0.02], [0, 0, -0.4]);
+      decoCone(g, md, [0.3, 0.6, 0.3], [0.24, 2.12, 0.02], [0, 0, 0.4]);
+      decoBox(g, m, [0.88, 0.72, 0.12], [0, 1.18, 0.27]);
+      decoCone(g, md, [0.26, 0.5, 0.26], [-0.56, 1.5, 0], [0, 0, 0.55]);
+      decoCone(g, md, [0.26, 0.5, 0.26], [0.56, 1.5, 0], [0, 0, -0.55]);
+    });
+
     this.fall.add(this.body, this.head, this.legL, this.legR, this.armL, this.armR);
     this.group.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     this.group.visible = false;
@@ -1335,7 +1419,7 @@ class Enemy {
     this.tongueCd = 0; this.attackKind = 'orb';
     this.speedMulT = 0; this.speedMul = 1;   // 狂暴加速 1.3 / 闪电减速 0.5
   }
-  /** 应用类型外观（体型缩放 + 配色 + 眼部颜色） */
+  /** 应用类型外观（体型变体 + 装饰切换 + 配色 + 眼部颜色） */
   applyType(type) {
     this.type = type;
     var t = ENEMY_TYPES[type] || ENEMY_TYPES.grunt;
@@ -1344,6 +1428,15 @@ class Enemy {
     this.mats[1].color.setHex(t.head);
     this.eyeMat.emissive.setHex(t.eye);
     this.bodyRadius = 0.55 * t.scale;
+    // v2.0 外观差异化：装饰部件切换 + 体型变体（命中盒随外观一致变化）
+    for (var k in this.deco) this.deco[k].visible = (k === type);
+    var v = BODY_VARIANTS[type] || BODY_VARIANTS.grunt;
+    this.body.scale.set(v.body[0], v.body[1], v.body[2]);
+    this.head.scale.set(v.head[0], v.head[1], v.head[2]);
+    this.legL.scale.set(v.limb[0], v.limb[1], v.limb[2]);
+    this.legR.scale.set(v.limb[0], v.limb[1], v.limb[2]);
+    this.armL.scale.set(v.limb[0], v.limb[1], v.limb[2]);
+    this.armR.scale.set(v.limb[0], v.limb[1], v.limb[2]);
   }
   /** 受击闪红 / 前摇红光（发光色已在构造时设为红色） */
   setEmissive(intensity) {
@@ -2825,8 +2918,9 @@ var LOW_PLATFORM_SLOTS = [[8, -6, 3], [-8, 10, 3], [10, 18, 3], [0, 24, 3]];   /
 var PLATFORM_CHAIN = [[18, 14], [22, 12], [26, 10]];                          // 外环跳台链（0.6m）
 var PLATFORM_EXTRA = [[-20, 6], [-24, -4], [20, -4], [24, -16]];
 var CENTER_PLATFORM = [0, 0, 6, 1.2];        // 中央能量核心台 [x, z, 边长, 高度]（仅射手波 w≥7）
-var BRIDGE_N = [2.25, 53];                   // 北墙侧蹲伏掩体洞 [洞口中心 x, z]
-var BRIDGE_S = [-2.25, -53];                 // 南墙侧
+var BRIDGE_E = [53, 2.25, 1];                // 东墙侧蹲伏桥洞 [x, z, rot]（rot=1：开口沿 x）
+var BRIDGE_W = [-53, -2.25, 1];              // 西墙侧
+var DOOR_SLOTS = [[0, -54], [0, 54]];        // 出口拱门中心（北/南墙内侧，障碍物须避让）
 
 /* 地形随波次渐进解锁（与敌人解锁节奏同步；平台高度分级防无敌点：
    低台/跳台 0.6m < 近战高度差阈值 0.8m → 近战可威胁；
@@ -3098,11 +3192,23 @@ class MapBuilder {
     var cfg = terrainForWave(wave);
     var layout = { crates: [], pillars: [], walls: [], platforms: [], bridges: [] };
     var i;
+    // 出口门保护区：门前 7m × 门两侧 4.5m 恒无障碍（保证出口可见、可达、不被遮挡）
+    var doorZones = [];
+    for (i = 0; i < DOOR_SLOTS.length; i++) {
+      var dz = DOOR_SLOTS[i];
+      doorZones.push({ minX: dz[0] - 4.5, maxX: dz[0] + 4.5, minZ: dz[1] - 7, maxZ: dz[1] + 1.5 });
+    }
+    function inDoorZone(x, z) {
+      for (var k = 0; k < doorZones.length; k++) {
+        if (x >= doorZones[k].minX && x <= doorZones[k].maxX && z >= doorZones[k].minZ && z <= doorZones[k].maxZ) return true;
+      }
+      return false;
+    }
 
-    var crates = shuffleArr(CRATE_SLOTS.slice(), rnd);
+    var crates = shuffleArr(CRATE_SLOTS.slice(), rnd).filter(function (s) { return !inDoorZone(s[0], s[1]); });
     for (i = 0; i < Math.min(cfg.crates, crates.length); i++) layout.crates.push(crates[i]);
 
-    var pillars = shuffleArr(PILLAR_SLOTS.slice(), rnd);
+    var pillars = shuffleArr(PILLAR_SLOTS.slice(), rnd).filter(function (s) { return !inDoorZone(s[0], s[1]); });
     for (i = 0; i < Math.min(cfg.pillars, pillars.length); i++) layout.pillars.push(pillars[i]);
 
     // 平台（高度分级防无敌点：低台/跳台 0.6m 近战可威胁；中央能量台 1.2m 仅射手波）
@@ -3114,13 +3220,13 @@ class MapBuilder {
       }
     }
     if (cfg.lowPlatforms) {
-      var lows = shuffleArr(LOW_PLATFORM_SLOTS.slice(), rnd);
+      var lows = shuffleArr(LOW_PLATFORM_SLOTS.slice(), rnd).filter(function (s) { return !inDoorZone(s[0], s[1]); });
       for (i = 0; i < Math.min(cfg.lowPlatforms, lows.length); i++) layout.platforms.push(lows[i]);
     }
-    if (cfg.bridges) { layout.bridges.push(BRIDGE_N); layout.bridges.push(BRIDGE_S); }
+    if (cfg.bridges) { layout.bridges.push(BRIDGE_E); layout.bridges.push(BRIDGE_W); }
 
-    // 已占用区域（含间距 0.3m）：箱子/柱/平台/桥洞
-    var placed = [];
+    // 已占用区域（含间距 0.3m）：出口保护区 + 箱子/柱/平台/桥洞
+    var placed = doorZones.slice();
     for (i = 0; i < layout.crates.length; i++) {
       var cr = layout.crates[i];
       placed.push({ minX: cr[0] - cr[2] - 0.3, maxX: cr[0] + cr[2] + 0.3, minZ: cr[1] - cr[3] - 0.3, maxZ: cr[1] + cr[3] + 0.3 });
@@ -3136,7 +3242,11 @@ class MapBuilder {
     }
     for (i = 0; i < layout.bridges.length; i++) {
       var bd = layout.bridges[i];
-      placed.push({ minX: bd[0] - 3.05, maxX: bd[0] + 3.05, minZ: bd[1] - 1.8, maxZ: bd[1] + 1.8 });
+      if (bd[2] === 1) {
+        placed.push({ minX: bd[0] - 1.8, maxX: bd[0] + 1.8, minZ: bd[1] - 3.05, maxZ: bd[1] + 3.05 });
+      } else {
+        placed.push({ minX: bd[0] - 3.05, maxX: bd[0] + 3.05, minZ: bd[1] - 1.8, maxZ: bd[1] + 1.8 });
+      }
     }
     // 玩家周围 3m 清空（重建瞬间不把玩家卡进障碍；构造函数阶段 player 尚未创建则跳过）
     var pp = this.game.player ? this.game.player.pos : null;
@@ -3226,32 +3336,39 @@ class MapBuilder {
     }
     for (i = 0; i < layout.bridges.length; i++) {
       var bd = layout.bridges[i];
-      var cx = bd[0], cz = bd[1];
-      var roof = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.3, 3), this.bridgeMat);
+      var cx = bd[0], cz = bd[1], rot = bd[2] || 0;   // rot=1：开口沿 x（东西墙）
+      var wide = rot === 1;
+      var roof = new THREE.Mesh(new THREE.BoxGeometry(wide ? 3 : 5.5, 0.3, wide ? 5.5 : 3), this.bridgeMat);
       roof.position.set(cx, 1.45, cz);
       roof.castShadow = roof.receiveShadow = true;
       this.varGroup.add(roof);
-      var b1 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 3), this.bridgeMat);
-      b1.position.set(cx - 2, 1.5, cz);
-      var b2 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 3), this.bridgeMat);
-      b2.position.set(cx + 2, 1.5, cz);
+      var b1 = new THREE.Mesh(new THREE.BoxGeometry(wide ? 3 : 1.5, 3, wide ? 1.5 : 3), this.bridgeMat);
+      var b2 = new THREE.Mesh(new THREE.BoxGeometry(wide ? 3 : 1.5, 3, wide ? 1.5 : 3), this.bridgeMat);
+      if (wide) { b1.position.set(cx, 1.5, cz - 2); b2.position.set(cx, 1.5, cz + 2); }
+      else { b1.position.set(cx - 2, 1.5, cz); b2.position.set(cx + 2, 1.5, cz); }
       b1.castShadow = b1.receiveShadow = b2.castShadow = b2.receiveShadow = true;
       this.varGroup.add(b1); this.varGroup.add(b2);
       this.solidMeshes.push(roof, b1, b2);
       this.coverMeshes.push(roof, b1, b2);
       // 门框青色发光条（装饰，提示蹲伏通道）
-      var glowL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 3.05), this.bridgeGlowMat);
-      glowL.position.set(cx - 2.75, 1.62, cz);
-      var glowR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 3.05), this.bridgeGlowMat);
-      glowR.position.set(cx + 2.75, 1.62, cz);
-      var glowT = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.16, 0.16), this.bridgeGlowMat);
-      glowT.position.set(cx, 1.62, cz - 1.55);
+      var glowL = new THREE.Mesh(new THREE.BoxGeometry(wide ? 3.05 : 0.16, 0.16, wide ? 0.16 : 3.05), this.bridgeGlowMat);
+      var glowR = new THREE.Mesh(new THREE.BoxGeometry(wide ? 3.05 : 0.16, 0.16, wide ? 0.16 : 3.05), this.bridgeGlowMat);
+      if (wide) { glowL.position.set(cx, 1.62, cz - 2.75); glowR.position.set(cx, 1.62, cz + 2.75); }
+      else { glowL.position.set(cx - 2.75, 1.62, cz); glowR.position.set(cx + 2.75, 1.62, cz); }
+      var glowT = new THREE.Mesh(new THREE.BoxGeometry(wide ? 0.16 : 5.6, 0.16, wide ? 5.6 : 0.16), this.bridgeGlowMat);
+      if (wide) glowT.position.set(cx - 1.55, 1.62, cz);
+      else glowT.position.set(cx, 1.62, cz - 1.55);
       this.varGroup.add(glowL); this.varGroup.add(glowR); this.varGroup.add(glowT);
       // 通道区：实体判定恒不挡（top:-1）+ 压板挡站姿（ceil 1.3，蹲伏 1.15 可过）
-      this.boxes.push({ minX: cx - 1.25, maxX: cx + 1.25, minZ: cz - 1.5, maxZ: cz + 1.5, top: -1, ceil: 1.3 });
-      // 侧柱碰撞（恒实心，敌人绕行）
-      this.boxes.push({ minX: cx - 2.75, maxX: cx - 1.25, minZ: cz - 1.5, maxZ: cz + 1.5 });
-      this.boxes.push({ minX: cx + 1.25, maxX: cx + 2.75, minZ: cz - 1.5, maxZ: cz + 1.5 });
+      if (wide) {
+        this.boxes.push({ minX: cx - 1.5, maxX: cx + 1.5, minZ: cz - 1.25, maxZ: cz + 1.25, top: -1, ceil: 1.3 });
+        this.boxes.push({ minX: cx - 1.5, maxX: cx + 1.5, minZ: cz - 2.75, maxZ: cz - 1.25 });
+        this.boxes.push({ minX: cx - 1.5, maxX: cx + 1.5, minZ: cz + 1.25, maxZ: cz + 2.75 });
+      } else {
+        this.boxes.push({ minX: cx - 1.25, maxX: cx + 1.25, minZ: cz - 1.5, maxZ: cz + 1.5, top: -1, ceil: 1.3 });
+        this.boxes.push({ minX: cx - 2.75, maxX: cx - 1.25, minZ: cz - 1.5, maxZ: cz + 1.5 });
+        this.boxes.push({ minX: cx + 1.25, maxX: cx + 2.75, minZ: cz - 1.5, maxZ: cz + 1.5 });
+      }
     }
   }
 
@@ -3307,7 +3424,8 @@ class MapBuilder {
     }
     for (i = 0; i < layout.bridges.length; i++) {
       var bd = layout.bridges[i];
-      markBox({ minX: bd[0] - 2.75, maxX: bd[0] + 2.75, minZ: bd[1] - 1.5, maxZ: bd[1] + 1.5 });
+      if (bd[2] === 1) markBox({ minX: bd[0] - 1.5, maxX: bd[0] + 1.5, minZ: bd[1] - 2.75, maxZ: bd[1] + 2.75 });
+      else markBox({ minX: bd[0] - 2.75, maxX: bd[0] + 2.75, minZ: bd[1] - 1.5, maxZ: bd[1] + 1.5 });
     }
     function bfsReachesEdge(sx, sz) {
       if (blocked[sz * N + sx]) return false;
@@ -4278,8 +4396,9 @@ class Game {
     var dg = d.doorGroup;
     while (dg.children.length) dg.remove(dg.children[0]);
     d.doors = [];
-    var slots = [[0, -54, 0], [0, 54, 0]];
-    for (var i = 0; i < slots.length; i++) d.doors.push(this.makeDoor(slots[i][0], slots[i][1], slots[i][2]));
+    for (var i = 0; i < DOOR_SLOTS.length; i++) {
+      d.doors.push(this.makeDoor(DOOR_SLOTS[i][0], DOOR_SLOTS[i][1], 0));
+    }
   }
   makeDoor(x, z, ry) {
     var g = new THREE.Group();
