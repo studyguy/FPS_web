@@ -201,7 +201,7 @@
   </ul>
   <button id="startBtn" class="btn">点击开始</button>
   <p class="tip">点击后鼠标将被锁定用于控制视角，按 Esc 可暂停</p>
-  <p class="tip" style="color:rgba(150,200,230,.75)">地形每波随机生成：跳跃可上 1m 高台 · 蹲伏可钻 1.3m 桥洞 · 矮墙后蹲姿可隐蔽</p>
+  <p class="tip" style="color:rgba(150,200,230,.75)">地形随波次变化：低台/跳台可上（近战能打到你）· 矮墙可翻不可站 · 第 7 波中央升起能量高台（小心射手）· 桥洞蹲伏可钻</p>
 </div>
 
 <!-- 暂停界面 -->
@@ -1397,7 +1397,8 @@ class EnemyManager {
 /* ======================= 地图（每波程序化生成：常驻骨架 + 可变地形） ======================= */
 /* 候选槽位表（已互相校验：与木箱/柱/刷怪环 r30~44 无冲突，保证生成布局无死路）
    CRATE_SLOTS: [x, z, 半宽, 半深]；PILLAR_SLOTS: [x, z]；WALL_SLOTS: [x, z, 长]（东西向）
-   PLATFORM_CHAIN: 东侧连跳路线（相邻中心距 4.47m / 边缘 2.47m，走跳可过） */
+   LOW_PLATFORM_SLOTS: 内环低台 [x, z, 边长]（0.6m，近战可威胁，非安全屋）
+   PLATFORM_CHAIN: 外环跳台链（2×2，0.6m；相邻中心距 4.47m / 边缘 2.47m，走跳可过） */
 var CRATE_SLOTS = [
   [12, 6, 1.7, 1.7], [-13, 9, 1.7, 1.7], [20, -14, 1.7, 1.7], [-21, -18, 1.7, 1.7],
   [6, -34, 1.7, 1.7], [-8, 24, 1.7, 1.7], [27, 22, 1.7, 1.7], [-27, 26, 1.7, 1.7],
@@ -1409,21 +1410,26 @@ var WALL_SLOTS = [
   [-22, -8, 3.5], [24, -10, 3.5], [12, 10, 3], [-12, -14, 3], [8, 24, 3.5], [-6, 20, 3],
   [20, -20, 3.5], [-24, 10, 3], [4, -8, 3], [-5, 5, 3]
 ];
-var PLATFORM_CHAIN = [[18, 14], [22, 12], [26, 10]];
+var LOW_PLATFORM_SLOTS = [[8, -6, 3], [-8, 10, 3], [10, 18, 3], [0, 24, 3]];   // 内环低台（0.6m）
+var PLATFORM_CHAIN = [[18, 14], [22, 12], [26, 10]];                          // 外环跳台链（0.6m）
 var PLATFORM_EXTRA = [[-20, 6], [-24, -4], [20, -4], [24, -16]];
-var CENTER_PLATFORM = [0, 0, 6];     // 中央高台 [x, z, 边长]
-var BRIDGE_N = [2.25, 53];           // 北墙侧蹲伏掩体洞 [洞口中心 x, z]
-var BRIDGE_S = [-2.25, -53];         // 南墙侧
+var CENTER_PLATFORM = [0, 0, 6, 1.2];        // 中央能量核心台 [x, z, 边长, 高度]（仅射手波 w≥7）
+var BRIDGE_N = [2.25, 53];                   // 北墙侧蹲伏掩体洞 [洞口中心 x, z]
+var BRIDGE_S = [-2.25, -53];                 // 南墙侧
 
-/* 地形随波次渐进解锁（与敌人解锁节奏同步） */
+/* 地形随波次渐进解锁（与敌人解锁节奏同步；平台高度分级防无敌点：
+   低台/跳台 0.6m < 近战高度差阈值 0.8m → 近战可威胁；
+   中央高台 1.2m 仅在射手波出现 → 有远程威胁） */
 function terrainForWave(w) {
   return {
     crates: 8,
     pillars: 4,
     lowWalls: w >= 9 ? 6 : (w >= 7 ? 5 : (w >= 5 ? 4 : (w >= 3 ? 3 : 2))),
-    platforms: w >= 3,          // 中央高台 + 东侧跳台链
-    extraPlatform: w >= 5,      // 额外独立跳台
-    bridges: w >= 7             // 南北蹲伏桥洞（射手波）
+    lowPlatforms: w >= 5 ? 3 : (w >= 3 ? 2 : 0),   // 内环低台（0.6m）
+    platforms: w >= 3,                              // 跳台链（0.6m 落脚点）
+    extraPlatform: w >= 5,                          // 额外独立跳台
+    centerPlatform: w >= 7,                         // 中央能量高台 1.2m（与射手同步）
+    bridges: w >= 7                                 // 南北蹲伏桥洞（射手波）
   };
 }
 function shuffleArr(arr, rnd) {
@@ -1480,6 +1486,32 @@ class MapBuilder {
     this.platformMat = new THREE.MeshStandardMaterial({ color: 0x2b3d52, roughness: 0.85 });
     this.platformEdgeMat = new THREE.MeshBasicMaterial({ color: 0x35a8ff });
     this.bridgeMat = new THREE.MeshStandardMaterial({ color: 0x5a6577, roughness: 0.85 });
+    // 中央能量核心台（w7+ 制高点，高风险）
+    this.centralMat = new THREE.MeshStandardMaterial({ color: 0x3a2e26, roughness: 0.7, metalness: 0.35 });
+    this.centralTopTex = makeTex(128, function (g, s) {
+      var grad = g.createRadialGradient(s / 2, s / 2, 2, s / 2, s / 2, s / 2);
+      grad.addColorStop(0, 'rgba(255,150,50,0.95)');
+      grad.addColorStop(0.45, 'rgba(255,110,30,0.35)');
+      grad.addColorStop(1, 'rgba(255,90,20,0)');
+      g.fillStyle = grad; g.fillRect(0, 0, s, s);
+    });
+    this.centralTopMat = new THREE.MeshBasicMaterial({ map: this.centralTopTex, transparent: true, depthWrite: false });
+    this.centralEdgeMat = new THREE.MeshBasicMaterial({ color: 0xff9a3d });
+    // 矮墙顶部黄色警戒条（提示可翻越不可站）
+    this.wallStripeMat = new THREE.MeshBasicMaterial({ color: 0xffb84d });
+    // 桥洞门框青色发光条
+    this.bridgeGlowMat = new THREE.MeshBasicMaterial({ color: 0x35e0ff });
+    // 出生点引导（绿色箭头 + 圆环）
+    this.spawnArrowTex = makeTex(64, function (g, s) {
+      g.fillStyle = 'rgba(61,255,138,0.85)';
+      g.beginPath();
+      g.moveTo(s * 0.5, s * 0.1);
+      g.lineTo(s * 0.84, s * 0.8);
+      g.lineTo(s * 0.5, s * 0.6);
+      g.lineTo(s * 0.16, s * 0.8);
+      g.closePath();
+      g.fill();
+    });
 
     this.buildFixed();
     this.rebuild(1);
@@ -1589,6 +1621,18 @@ class MapBuilder {
       scene.add(cl);
     }
 
+    /* 出生点引导（南侧 (0,30)，绿色箭头指向中央 -Z；无碰撞装饰） */
+    var arrow = new THREE.Mesh(new THREE.PlaneGeometry(4, 4),
+      new THREE.MeshBasicMaterial({ map: this.spawnArrowTex, transparent: true, depthWrite: false }));
+    arrow.rotation.x = -Math.PI / 2;
+    arrow.position.set(0, 0.03, 30);
+    scene.add(arrow);
+    var spawnRing = new THREE.Mesh(new THREE.RingGeometry(2.6, 3, 40),
+      new THREE.MeshBasicMaterial({ color: 0x3dff8a, transparent: true, opacity: 0.45, side: THREE.DoubleSide }));
+    spawnRing.rotation.x = -Math.PI / 2;
+    spawnRing.position.set(0, 0.02, 30);
+    scene.add(spawnRing);
+
     this.varGroup = new THREE.Group();
     scene.add(this.varGroup);
   }
@@ -1616,8 +1660,23 @@ class MapBuilder {
     if (this.game.player && !this.reachableFor(layout)) {
       if (this.lastLayout) layout = this.lastLayout;   // 坏图回退上一波
     }
+    if (!this.heightSafeFor(layout, Math.max(1, seed))) {
+      if (this.lastLayout) layout = this.lastLayout;   // 无敌点校验失败回退（防御，正常生成不触发）
+    }
     this.buildLayout(layout);
     this.lastLayout = layout;
+  }
+
+  /* 无敌点硬校验：可站立地形高度必须与威胁同步
+     w<7：全部 ≤0.6m（近战可命中）；w≥7：仅中央能量台可 1.2m（有射手威胁） */
+  heightSafeFor(layout, wave) {
+    var maxH = 0;
+    for (var i = 0; i < layout.platforms.length; i++) {
+      var h = layout.platforms[i][3] || 0.6;
+      if (h > maxH) maxH = h;
+    }
+    if (wave < 7) return maxH <= 0.6;
+    return maxH <= 1.2;
   }
 
   /* ---------- 布局生成（确定性 PRNG + 约束） ---------- */
@@ -1634,13 +1693,17 @@ class MapBuilder {
     var pillars = shuffleArr(PILLAR_SLOTS.slice(), rnd);
     for (i = 0; i < Math.min(cfg.pillars, pillars.length); i++) layout.pillars.push(pillars[i]);
 
-    // 平台 / 桥洞（先定，矮墙避让时参考）
+    // 平台（高度分级防无敌点：低台/跳台 0.6m 近战可威胁；中央能量台 1.2m 仅射手波）
+    if (cfg.centerPlatform) layout.platforms.push(CENTER_PLATFORM);
     if (cfg.platforms) {
-      layout.platforms.push(CENTER_PLATFORM);
       for (i = 0; i < PLATFORM_CHAIN.length; i++) layout.platforms.push(PLATFORM_CHAIN[i]);
       if (cfg.extraPlatform) {
         layout.platforms.push(PLATFORM_EXTRA[Math.floor(rnd() * PLATFORM_EXTRA.length)]);
       }
+    }
+    if (cfg.lowPlatforms) {
+      var lows = shuffleArr(LOW_PLATFORM_SLOTS.slice(), rnd);
+      for (i = 0; i < Math.min(cfg.lowPlatforms, lows.length); i++) layout.platforms.push(lows[i]);
     }
     if (cfg.bridges) { layout.bridges.push(BRIDGE_N); layout.bridges.push(BRIDGE_S); }
 
@@ -1713,26 +1776,41 @@ class MapBuilder {
       this.varGroup.add(wm);
       this.solidMeshes.push(wm);
       this.coverMeshes.push(wm);
-      var wb = { minX: w[0] - w[2] / 2, maxX: w[0] + w[2] / 2, minZ: w[1] - 0.25, maxZ: w[1] + 0.25, top: 1.35 };
-      this.boxes.push(wb);
-      this.platforms.push(wb);
+      // 顶部黄色警戒条（可翻越、不可站立）
+      var stripe = new THREE.Mesh(new THREE.BoxGeometry(w[2], 0.08, 0.54), this.wallStripeMat);
+      stripe.position.set(w[0], 1.39, w[1]);
+      this.varGroup.add(stripe);
+      this.solidMeshes.push(stripe);
+      this.coverMeshes.push(stripe);
+      // 注意：矮墙不加入 platforms —— 矮墙顶不可站立（防无敌点），groundEye 不认
+      this.boxes.push({ minX: w[0] - w[2] / 2, maxX: w[0] + w[2] / 2, minZ: w[1] - 0.25, maxZ: w[1] + 0.25, top: 1.35 });
     }
     for (i = 0; i < layout.platforms.length; i++) {
       var pf = layout.platforms[i];
       var size = pf[2] || 2;
-      var pm2 = new THREE.Mesh(new THREE.BoxGeometry(size, 1.0, size), this.platformMat);
-      pm2.position.set(pf[0], 0.5, pf[1]);
+      var h = pf[3] || 0.6;                       // 高度分级：低台/跳台 0.6m，中央能量台 1.2m
+      var isCentral = h > 1;
+      var pm2 = new THREE.Mesh(new THREE.BoxGeometry(size, h, size),
+        isCentral ? this.centralMat : this.platformMat);
+      pm2.position.set(pf[0], h / 2, pf[1]);
       pm2.castShadow = pm2.receiveShadow = true;
       this.varGroup.add(pm2);
-      var edge = new THREE.Mesh(new THREE.BoxGeometry(size + 0.22, 0.05, size + 0.22), this.platformEdgeMat);
-      edge.position.set(pf[0], 1.025, pf[1]);
+      var edge = new THREE.Mesh(new THREE.BoxGeometry(size + 0.22, 0.05, size + 0.22),
+        isCentral ? this.centralEdgeMat : this.platformEdgeMat);
+      edge.position.set(pf[0], h + 0.025, pf[1]);
       this.varGroup.add(edge);
       this.solidMeshes.push(pm2);
       this.coverMeshes.push(pm2);
       this.coverMeshes.push(edge);
-      var pb = { minX: pf[0] - size / 2, maxX: pf[0] + size / 2, minZ: pf[1] - size / 2, maxZ: pf[1] + size / 2, top: 1.0 };
-      this.boxes.push(pb);
-      this.platforms.push(pb);
+      if (isCentral) {
+        // 中央能量核心顶面光晕（装饰，不挡子弹）
+        var ctop = new THREE.Mesh(new THREE.CircleGeometry(size / 2 - 0.15, 40), this.centralTopMat);
+        ctop.rotation.x = -Math.PI / 2;
+        ctop.position.set(pf[0], h + 0.04, pf[1]);
+        this.varGroup.add(ctop);
+      }
+      this.boxes.push({ minX: pf[0] - size / 2, maxX: pf[0] + size / 2, minZ: pf[1] - size / 2, maxZ: pf[1] + size / 2, top: h });
+      this.platforms.push({ minX: pf[0] - size / 2, maxX: pf[0] + size / 2, minZ: pf[1] - size / 2, maxZ: pf[1] + size / 2, top: h });
     }
     for (i = 0; i < layout.bridges.length; i++) {
       var bd = layout.bridges[i];
@@ -1749,6 +1827,14 @@ class MapBuilder {
       this.varGroup.add(b1); this.varGroup.add(b2);
       this.solidMeshes.push(roof, b1, b2);
       this.coverMeshes.push(roof, b1, b2);
+      // 门框青色发光条（装饰，提示蹲伏通道）
+      var glowL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 3.05), this.bridgeGlowMat);
+      glowL.position.set(cx - 2.75, 1.62, cz);
+      var glowR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 3.05), this.bridgeGlowMat);
+      glowR.position.set(cx + 2.75, 1.62, cz);
+      var glowT = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.16, 0.16), this.bridgeGlowMat);
+      glowT.position.set(cx, 1.62, cz - 1.55);
+      this.varGroup.add(glowL); this.varGroup.add(glowR); this.varGroup.add(glowT);
       // 通道区：实体判定恒不挡（top:-1）+ 压板挡站姿（ceil 1.3，蹲伏 1.15 可过）
       this.boxes.push({ minX: cx - 1.25, maxX: cx + 1.25, minZ: cz - 1.5, maxZ: cz + 1.5, top: -1, ceil: 1.3 });
       // 侧柱碰撞（恒实心，敌人绕行）
