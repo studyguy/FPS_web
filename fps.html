@@ -161,7 +161,7 @@
     font-size: 15px; color: #bfe6ff; background: rgba(10,16,28,.6); padding: 6px 16px;
     border-radius: 20px; border: 1px solid rgba(120,220,255,.2); opacity: 0; transition: opacity .3s; }
   #toast.show { opacity: 1; }
-  #hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+  #hint { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%);
     font-size: 12px; color: rgba(190,215,240,.55); letter-spacing: 1px; white-space: nowrap; }
   #diag { position: fixed; top: 16px; right: 16px; font-size: 12px;
     color: rgba(190,215,240,.65); background: rgba(8,12,20,.45); padding: 5px 10px;
@@ -780,7 +780,7 @@ var WEAPONS = {
   },
   shotgun: {
     id: 'shotgun', name: '霰弹枪', key: 3, unlocked: false, unlockWave: 3,
-    damage: 12, fireRate: 1.2, magSize: 6, reserve: 36, reserveInf: false,
+    damage: 13, fireRate: 1.2, magSize: 6, reserve: 36, reserveInf: false,
     reloadTime: 2.4, switchTime: 0.45, baseSpread: 0.05, moveSpread: 0.03,
     kickP: 0.03, kickY: 0.012, kickMax: 0.16, aimFov: 75, moveMul: 0.9,
     pellets: 8, knock: 1.2, color: 0x3a2c1e, dark: 0x241a10, accent: 0x8a5a2e
@@ -1877,15 +1877,25 @@ var ENEMY_STATS = {
 /* 波次构成：[突击兵, 疾行者, 重装兵, 射手]；11 波起按公式增长，单波上限 26 只 */
 var WAVE_TABLE = [
   null,
-  [5, 0, 0, 0], [7, 0, 0, 0], [7, 2, 0, 0], [8, 3, 0, 0], [8, 3, 1, 0],
-  [9, 4, 2, 0], [9, 4, 2, 1], [10, 5, 2, 2], [11, 5, 3, 2], [12, 6, 3, 3]
+  [5, 0, 0, 0], [7, 0, 0, 0], [8, 2, 0, 0], [9, 3, 0, 0], [9, 4, 1, 0],
+  [10, 5, 1, 0], [10, 5, 2, 1], [11, 6, 2, 2], [12, 6, 3, 2], [13, 7, 3, 3]
 ];
 function waveComposition(w) {
   if (w <= 10) return WAVE_TABLE[w];
-  var extra = w - 10;
-  var c = [12 + extra * 2, 6 + extra, 3 + Math.floor(extra / 3), 3 + Math.floor(extra / 3)];
-  var total = c[0] + c[1] + c[2] + c[3];
-  if (total > 26) c[0] = Math.max(5, c[0] - (total - 26));
+  // 11 波起：总数增长放缓（+0.8/波，上限 26），构成按比例 55/25/10/10 归一化
+  var total = Math.min(26, 20 + Math.floor((w - 10) * 0.8));
+  var c = [
+    Math.round(total * 0.55),
+    Math.round(total * 0.25),
+    Math.round(total * 0.1),
+    Math.round(total * 0.1)
+  ];
+  var sum = c[0] + c[1] + c[2] + c[3];
+  c[0] += total - sum;                 // 差值归入突击兵
+  if (c[0] < 5) {                      // 防御：突击兵不低于 5
+    c[1] += c[0] - 5;
+    c[0] = 5;
+  }
   return c;
 }
 
@@ -1992,8 +2002,8 @@ class EnemyManager {
   scaleCfg(type) {
     var s = ENEMY_STATS[type] || ENEMY_STATS.grunt;
     var w = this.wave;
-    var hpMul = Math.min(3.0, 1 + 0.12 * (w - 1));       // 血量
-    var dmgMul = Math.min(1.8, 1 + 0.06 * (w - 1));      // 伤害
+    var hpMul = Math.min(3.0, 1 + 0.09 * (w - 1));       // 血量（放缓）
+    var dmgMul = Math.min(1.6, 1 + 0.045 * (w - 1));     // 伤害（放缓）
     var spd = Math.min(s.speed * 1.5, s.speed + 0.05 * (w - 1)); // 移速
     return {
       hp: Math.round(s.hp * hpMul), speed: spd, damage: Math.round(s.damage * dmgMul),
@@ -2049,6 +2059,8 @@ class EnemyManager {
     } else if (this.active.length === 0 && !this.between) {
       this.between = true;
       this.waveDelay = 2.5;                 // 波次间隙
+      game.player.hp = 100;                 // 波间回满血（波间喘息）
+      game.player.dmgTimer = 999;
       game.rebuildMap();                    // 每波重建可变地形（种子 = 波次）
       game.pickups.refreshBetween();         // 刷道具箱 + 武器箱
       // Tank 事件波：第 8 波起每 8 波，清场后触发 Boss 战
