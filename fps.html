@@ -201,6 +201,7 @@
   </ul>
   <button id="startBtn" class="btn">点击开始</button>
   <p class="tip">点击后鼠标将被锁定用于控制视角，按 Esc 可暂停</p>
+  <p class="tip" style="color:rgba(150,200,230,.75)">地形每波随机生成：跳跃可上 1m 高台 · 蹲伏可钻 1.3m 桥洞 · 矮墙后蹲姿可隐蔽</p>
 </div>
 
 <!-- 暂停界面 -->
@@ -279,6 +280,16 @@
 /* ======================= 工具函数 ======================= */
 function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
 
+/** mulberry32 确定性伪随机（同种子同序列，用于每波地图生成可复现） */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
 /** 生成 Canvas 纹理（无需外部图片资源） */
 function makeTex(size, fn) {
   var c = document.createElement('canvas');
@@ -291,10 +302,19 @@ function makeTex(size, fn) {
   return t;
 }
 
-/** 圆形碰撞体 vs AABB / 圆柱（把玩家/敌人当作圆，进行推挤解算） */
-function resolveCircle(pos, r, boxes, cyls) {
+/** 圆形碰撞体 vs AABB / 圆柱（把玩家/敌人当作圆，进行推挤解算）
+    eye 为 null 时所有盒恒实心（敌人/刷怪点，2D 行为不变）；
+    eye 为玩家时按高度感知：实体 top 用脚底判定（bottom < top 挡），压板 ceil 用眼睛判定（eyeY > ceil 挡） */
+function resolveCircle(pos, r, boxes, cyls, eye) {
   for (var i = 0; i < boxes.length; i++) {
     var b = boxes[i];
+    if (eye) {
+      var bottom = eye.bottom, eyeY = eye.eyeY;
+      var bTop = (b.top === undefined) ? Infinity : b.top;
+      var bCeil = (b.ceil === undefined) ? Infinity : b.ceil;
+      var blocked = (bottom < bTop) || (eyeY > bCeil);
+      if (!blocked) continue;              // 可越过（跳跃）/ 可穿过（蹲伏）
+    }
     var cx = clamp(pos.x, b.minX, b.maxX);
     var cz = clamp(pos.z, b.minZ, b.maxZ);
     var dx = pos.x - cx, dz = pos.z - cz;
@@ -932,7 +952,8 @@ class Enemy {
     var pos = this.group.position;
     var pp = game.player.pos;
     var eye = new THREE.Vector3(pos.x, 1.5, pos.z);
-    var dirT = new THREE.Vector3(pp.x - pos.x, 0, pp.z - pos.z).normalize();
+    var eyeH = pp.y + game.player.eyeOff;   // 玩家当前眼睛高度（蹲伏更低）
+    var dirT = new THREE.Vector3(pp.x - pos.x, eyeH - 1.5, pp.z - pos.z).normalize();
     var r = game._ray;
     r.set(eye, dirT, 0, Infinity);
     var hits = r.intersectObjects(game.map.solidMeshes, false);
@@ -962,7 +983,9 @@ class Enemy {
       this.armL.rotation.x = -2.3;
       this.armR.rotation.x = -2.3;
       if (this.phaseT <= 0) {
-        if (dist <= this.attackRange && los && game.state === 'playing') {
+        // 近战高度差判定：玩家站平台上时脚下敌人无法隔空命中
+        var hDiff = Math.abs((game.player.pos.y - PlayerConfig.EYE) - pos.y);
+        if (dist <= this.attackRange && los && hDiff < PlayerConfig.MELEE_HEIGHT_GAP && game.state === 'playing') {
           game.player.takeDamage(this.damage, { knockback: this.knockback, from: pos });
           if (this.lunge > 0) {                       // 攻击突进，反风筝
             var inv = dist > 0.0001 ? 1 / dist : 0;
@@ -1279,6 +1302,7 @@ class EnemyManager {
     } else if (this.active.length === 0 && !this.between) {
       this.between = true;
       this.waveDelay = 2.5;                 // 波次间隙
+      game.rebuildMap();                    // 每波重建可变地形（种子 = 波次）
     }
     if (this.between) {
       this.waveDelay -= dt;
@@ -1335,6 +1359,13 @@ class EnemyManager {
       var p = new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
       if (p.distanceTo(game.player.pos) < 18) continue;   // 离玩家太近则重选
       resolveCircle(p, 1.2, game.map.colliders.boxes, game.map.colliders.cylinders);
+      // 避让平台/矮墙（出生在地面，不在高处）
+      var onPlat = false;
+      for (var k = 0; k < game.map.platforms.length; k++) {
+        var pf = game.map.platforms[k];
+        if (p.x >= pf.minX && p.x <= pf.maxX && p.z >= pf.minZ && p.z <= pf.maxZ) { onPlat = true; break; }
+      }
+      if (onPlat) continue;
       p.x = clamp(p.x, -54, 54);
       p.z = clamp(p.z, -54, 54);
       return p;
@@ -1363,21 +1394,102 @@ class EnemyManager {
 }
 
 /* ======================= 地图（竞技场 + 掩体 + 光照） ======================= */
+/* ======================= 地图（每波程序化生成：常驻骨架 + 可变地形） ======================= */
+/* 候选槽位表（已互相校验：与木箱/柱/刷怪环 r30~44 无冲突，保证生成布局无死路）
+   CRATE_SLOTS: [x, z, 半宽, 半深]；PILLAR_SLOTS: [x, z]；WALL_SLOTS: [x, z, 长]（东西向）
+   PLATFORM_CHAIN: 东侧连跳路线（相邻中心距 4.47m / 边缘 2.47m，走跳可过） */
+var CRATE_SLOTS = [
+  [12, 6, 1.7, 1.7], [-13, 9, 1.7, 1.7], [20, -14, 1.7, 1.7], [-21, -18, 1.7, 1.7],
+  [6, -34, 1.7, 1.7], [-8, 24, 1.7, 1.7], [27, 22, 1.7, 1.7], [-27, 26, 1.7, 1.7],
+  [34, -6, 1.7, 1.7], [-34, -10, 1.7, 1.7], [0, -16, 3.7, 1.7], [-10, -6, 1.7, 3.7]
+];
+var PILLAR_SLOTS = [[-44, 12], [44, -12], [0, 44], [0, -44], [-22, -32], [24, 32]];
+var WALL_SLOTS = [
+  [0, -26, 3], [10, -28, 3], [-14, -26, 3], [16, 16, 3], [-16, 18, 3], [0, 16, 3],
+  [-22, -8, 3.5], [24, -10, 3.5], [12, 10, 3], [-12, -14, 3], [8, 24, 3.5], [-6, 20, 3],
+  [20, -20, 3.5], [-24, 10, 3], [4, -8, 3], [-5, 5, 3]
+];
+var PLATFORM_CHAIN = [[18, 14], [22, 12], [26, 10]];
+var PLATFORM_EXTRA = [[-20, 6], [-24, -4], [20, -4], [24, -16]];
+var CENTER_PLATFORM = [0, 0, 6];     // 中央高台 [x, z, 边长]
+var BRIDGE_N = [2.25, 53];           // 北墙侧蹲伏掩体洞 [洞口中心 x, z]
+var BRIDGE_S = [-2.25, -53];         // 南墙侧
+
+/* 地形随波次渐进解锁（与敌人解锁节奏同步） */
+function terrainForWave(w) {
+  return {
+    crates: 8,
+    pillars: 4,
+    lowWalls: w >= 9 ? 6 : (w >= 7 ? 5 : (w >= 5 ? 4 : (w >= 3 ? 3 : 2))),
+    platforms: w >= 3,          // 中央高台 + 东侧跳台链
+    extraPlatform: w >= 5,      // 额外独立跳台
+    bridges: w >= 7             // 南北蹲伏桥洞（射手波）
+  };
+}
+function shuffleArr(arr, rnd) {
+  for (var i = arr.length - 1; i > 0; i--) {
+    var n = Math.floor(rnd() * (i + 1));
+    var t = arr[i]; arr[i] = arr[n]; arr[n] = t;
+  }
+  return arr;
+}
+function boxesOverlap(a, b) {
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
+}
+
 class MapBuilder {
   constructor(game) {
     this.game = game;
-    this.boxes = [];        // AABB 碰撞盒
-    this.cylinders = [];    // 圆柱碰撞体
-    this.colliders = { boxes: this.boxes, cylinders: this.cylinders };  // 碰撞体统一入口（供玩家/敌人/刷怪点使用）
-    this.solidMeshes = [];  // 遮挡视线（用于敌人 AI）
-    this.coverMeshes = [];  // 子弹可命中的场景（含地面）
-    this.build();
-  }
-  build() {
-    var game = this.game, scene = game.scene;
-    var self = this;
+    this.boxes = [];          // 碰撞盒（rebuild 重组）
+    this.cylinders = [];      // 圆柱碰撞体
+    this.colliders = { boxes: this.boxes, cylinders: this.cylinders };
+    this.solidMeshes = [];    // 遮挡视线（rebuild 重组）
+    this.coverMeshes = [];    // 子弹可命中（rebuild 重组）
+    this.platforms = [];      // 可站立地形 {minX,maxX,minZ,maxZ,top}
+    this.fixedBoxes = [];     // 围墙碰撞盒（常驻）
+    this.fixedSolid = [];     // 围墙 mesh（常驻）
+    this.fixedCover = [];     // 围墙 + 地面（常驻）
+    this.varGroup = null;     // 可变地形容器（每波重建）
+    this.lastLayout = null;   // 上一波布局（可达性失败时回退）
 
-    /* ---- 地面（网格纹理） ---- */
+    /* 预建材质 / 几何（复用，重建不销毁） */
+    this.crateTex = makeTex(128, function (g, s) {
+      g.fillStyle = '#7c4a24'; g.fillRect(0, 0, s, s);
+      for (var i = 0; i < 4; i++) {
+        g.fillStyle = i % 2 ? '#8a5a2e' : '#7c4a24';
+        g.fillRect(0, i * 32, s, 30);
+        g.fillStyle = 'rgba(0,0,0,0.35)';
+        g.fillRect(0, i * 32 + 30, s, 2);
+      }
+      g.strokeStyle = '#5a3317'; g.lineWidth = 10;
+      g.strokeRect(4, 4, s - 8, s - 8);
+      g.beginPath(); g.moveTo(4, 4); g.lineTo(s - 4, s - 4);
+      g.moveTo(s - 4, 4); g.lineTo(4, s - 4); g.stroke();
+      g.fillStyle = '#3a2a1a';
+      [[10, 10], [s - 10, 10], [10, s - 10], [s - 10, s - 10]].forEach(function (c) {
+        g.fillRect(c[0] - 4, c[1] - 4, 8, 8);
+      });
+    });
+    this.crateMat = new THREE.MeshStandardMaterial({ map: this.crateTex, roughness: 0.8 });
+    this.crateGeo = new THREE.BoxGeometry(3.4, 3.4, 3.4);
+    this.longGeo = new THREE.BoxGeometry(7.4, 3.4, 3.4);
+    this.longGeoZ = new THREE.BoxGeometry(3.4, 3.4, 7.4);
+    this.pillarMat = new THREE.MeshStandardMaterial({ color: 0xb9c6d6, roughness: 0.3, metalness: 0.6 });
+    this.pillarGeo = new THREE.CylinderGeometry(1.6, 1.6, 8, 16);
+    this.wallMat = new THREE.MeshStandardMaterial({ color: 0x8b95a8, roughness: 0.9 });
+    this.platformMat = new THREE.MeshStandardMaterial({ color: 0x2b3d52, roughness: 0.85 });
+    this.platformEdgeMat = new THREE.MeshBasicMaterial({ color: 0x35a8ff });
+    this.bridgeMat = new THREE.MeshStandardMaterial({ color: 0x5a6577, roughness: 0.85 });
+
+    this.buildFixed();
+    this.rebuild(1);
+  }
+
+  /* ---------- 常驻元素：地面 / 围墙 / 装饰 / 光照 ---------- */
+  buildFixed() {
+    var scene = this.game.scene;
+
+    /* 地面（网格纹理） */
     var groundTex = makeTex(256, function (g, s) {
       g.fillStyle = '#242c38'; g.fillRect(0, 0, s, s);
       g.strokeStyle = 'rgba(120,160,200,0.10)'; g.lineWidth = 4;
@@ -1396,9 +1508,9 @@ class MapBuilder {
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
-    this.coverMeshes.push(ground);
+    this.fixedCover.push(ground);
 
-    /* ---- 围墙（砖墙纹理） ---- */
+    /* 围墙（砖墙纹理） */
     var brickTex = makeTex(128, function (g, s) {
       g.fillStyle = '#39404f'; g.fillRect(0, 0, s, s);
       var bw = 32, bh = 16;
@@ -1429,73 +1541,15 @@ class MapBuilder {
       wm.rotation.y = walls[i].ry;
       wm.castShadow = wm.receiveShadow = true;
       scene.add(wm);
-      this.solidMeshes.push(wm);
-      this.coverMeshes.push(wm);
+      this.fixedSolid.push(wm);
+      this.fixedCover.push(wm);
     }
-    this.boxes.push({ minX: -58, maxX: 58, minZ: -58, maxZ: -56 });
-    this.boxes.push({ minX: -58, maxX: 58, minZ: 56, maxZ: 58 });
-    this.boxes.push({ minX: -58, maxX: -56, minZ: -58, maxZ: 58 });
-    this.boxes.push({ minX: 56, maxX: 58, minZ: -58, maxZ: 58 });
+    this.fixedBoxes.push({ minX: -58, maxX: 58, minZ: -58, maxZ: -56 });
+    this.fixedBoxes.push({ minX: -58, maxX: 58, minZ: 56, maxZ: 58 });
+    this.fixedBoxes.push({ minX: -58, maxX: -56, minZ: -58, maxZ: 58 });
+    this.fixedBoxes.push({ minX: 56, maxX: 58, minZ: -58, maxZ: 58 });
 
-    /* ---- 掩体：木箱（木纹纹理） ---- */
-    var crateTex = makeTex(128, function (g, s) {
-      g.fillStyle = '#7c4a24'; g.fillRect(0, 0, s, s);
-      for (var i = 0; i < 4; i++) {
-        g.fillStyle = i % 2 ? '#8a5a2e' : '#7c4a24';
-        g.fillRect(0, i * 32, s, 30);
-        g.fillStyle = 'rgba(0,0,0,0.35)';
-        g.fillRect(0, i * 32 + 30, s, 2);
-      }
-      g.strokeStyle = '#5a3317'; g.lineWidth = 10;
-      g.strokeRect(4, 4, s - 8, s - 8);
-      g.beginPath(); g.moveTo(4, 4); g.lineTo(s - 4, s - 4);
-      g.moveTo(s - 4, 4); g.lineTo(4, s - 4); g.stroke();
-      g.fillStyle = '#3a2a1a';
-      [[10, 10], [s - 10, 10], [10, s - 10], [s - 10, s - 10]].forEach(function (c) {
-        g.fillRect(c[0] - 4, c[1] - 4, 8, 8);
-      });
-    });
-    var crateMat = new THREE.MeshStandardMaterial({ map: crateTex, roughness: 0.8 });
-    var crateGeo = new THREE.BoxGeometry(3.4, 3.4, 3.4);
-    var longGeo = new THREE.BoxGeometry(7.4, 3.4, 3.4);
-    var longGeoZ = new THREE.BoxGeometry(3.4, 3.4, 7.4);
-    var crates = [
-      [12, 6, crateGeo, 3.4, 3.4], [-13, 9, crateGeo, 3.4, 3.4],
-      [20, -14, crateGeo, 3.4, 3.4], [-21, -18, crateGeo, 3.4, 3.4],
-      [6, -34, crateGeo, 3.4, 3.4], [-8, 24, crateGeo, 3.4, 3.4],
-      [27, 22, crateGeo, 3.4, 3.4], [-27, 26, crateGeo, 3.4, 3.4],
-      [34, -6, crateGeo, 3.4, 3.4], [-34, -10, crateGeo, 3.4, 3.4],
-      [0, -16, longGeo, 7.4, 3.4], [-10, -6, longGeoZ, 3.4, 7.4]
-    ];
-    for (var c = 0; c < crates.length; c++) {
-      var cr = crates[c];
-      var cm = new THREE.Mesh(cr[2], crateMat);
-      cm.position.set(cr[0], 1.7, cr[1]);
-      cm.castShadow = cm.receiveShadow = true;
-      scene.add(cm);
-      this.solidMeshes.push(cm);
-      this.coverMeshes.push(cm);
-      this.boxes.push({
-        minX: cr[0] - cr[3] / 2, maxX: cr[0] + cr[3] / 2,
-        minZ: cr[1] - cr[4] / 2, maxZ: cr[1] + cr[4] / 2
-      });
-    }
-
-    /* ---- 掩体：金属柱 ---- */
-    var pillarMat = new THREE.MeshStandardMaterial({ color: 0xb9c6d6, roughness: 0.3, metalness: 0.6 });
-    var pillarGeo = new THREE.CylinderGeometry(1.6, 1.6, 8, 16);
-    var pillars = [[-44, 12], [44, -12], [0, 44], [0, -44], [-22, -32], [24, 32]];
-    for (var p = 0; p < pillars.length; p++) {
-      var pm = new THREE.Mesh(pillarGeo, pillarMat);
-      pm.position.set(pillars[p][0], 4, pillars[p][1]);
-      pm.castShadow = pm.receiveShadow = true;
-      scene.add(pm);
-      this.solidMeshes.push(pm);
-      this.coverMeshes.push(pm);
-      this.cylinders.push({ x: pillars[p][0], z: pillars[p][1], r: 1.6 });
-    }
-
-    /* ---- 中央平台（装饰，无碰撞） ---- */
+    /* 中央装饰圆盘（常驻；高台出现后叠加其上） */
     var disc = new THREE.Mesh(new THREE.CircleGeometry(8.4, 48),
       new THREE.MeshStandardMaterial({ color: 0x182230, roughness: 0.8 }));
     disc.rotation.x = -Math.PI / 2; disc.position.y = 0.015;
@@ -1509,7 +1563,7 @@ class MapBuilder {
     glow.rotation.x = Math.PI / 2; glow.position.y = 0.05;
     scene.add(glow);
 
-    /* ---- 光照：环境 + 半球 + 方向（带阴影）+ 点光源 ---- */
+    /* 光照：环境 + 半球 + 方向（带阴影）+ 点光源 */
     scene.add(new THREE.AmbientLight(0x556077, 0.35));
     scene.add(new THREE.HemisphereLight(0x8fb4ff, 0x2a2118, 0.55));
     var sun = new THREE.DirectionalLight(0xfff1dc, 1.15);
@@ -1522,7 +1576,6 @@ class MapBuilder {
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
     scene.add(sun);
-
     var centerLight = new THREE.PointLight(0xffbb77, 1.6, 45, 1.6);
     centerLight.position.set(0, 9, 0);
     scene.add(centerLight);
@@ -1535,8 +1588,278 @@ class MapBuilder {
       cl.position.set(cornerLights[L][0], cornerLights[L][1], cornerLights[L][2]);
       scene.add(cl);
     }
+
+    this.varGroup = new THREE.Group();
+    scene.add(this.varGroup);
+  }
+
+  /* ---------- 每波重建可变地形（seed = 波次，同波同图可复现） ---------- */
+  rebuild(seed) {
+    var scene = this.game.scene;
+    if (this.varGroup) {
+      scene.remove(this.varGroup);
+      this.varGroup.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
+    }
+    this.varGroup = new THREE.Group();
+    scene.add(this.varGroup);
+
+    this.boxes.length = 0;
+    this.cylinders.length = 0;
+    this.platforms.length = 0;
+    for (var f = 0; f < this.fixedBoxes.length; f++) this.boxes.push(this.fixedBoxes[f]);
+    this.solidMeshes.length = 0;
+    this.coverMeshes.length = 0;
+    for (var i = 0; i < this.fixedSolid.length; i++) this.solidMeshes.push(this.fixedSolid[i]);
+    for (var j = 0; j < this.fixedCover.length; j++) this.coverMeshes.push(this.fixedCover[j]);
+
+    var layout = this.generateLayout(seed >>> 0);
+    if (this.game.player && !this.reachableFor(layout)) {
+      if (this.lastLayout) layout = this.lastLayout;   // 坏图回退上一波
+    }
+    this.buildLayout(layout);
+    this.lastLayout = layout;
+  }
+
+  /* ---------- 布局生成（确定性 PRNG + 约束） ---------- */
+  generateLayout(seed) {
+    var rnd = mulberry32(seed);
+    var wave = Math.max(1, seed);
+    var cfg = terrainForWave(wave);
+    var layout = { crates: [], pillars: [], walls: [], platforms: [], bridges: [] };
+    var i;
+
+    var crates = shuffleArr(CRATE_SLOTS.slice(), rnd);
+    for (i = 0; i < Math.min(cfg.crates, crates.length); i++) layout.crates.push(crates[i]);
+
+    var pillars = shuffleArr(PILLAR_SLOTS.slice(), rnd);
+    for (i = 0; i < Math.min(cfg.pillars, pillars.length); i++) layout.pillars.push(pillars[i]);
+
+    // 平台 / 桥洞（先定，矮墙避让时参考）
+    if (cfg.platforms) {
+      layout.platforms.push(CENTER_PLATFORM);
+      for (i = 0; i < PLATFORM_CHAIN.length; i++) layout.platforms.push(PLATFORM_CHAIN[i]);
+      if (cfg.extraPlatform) {
+        layout.platforms.push(PLATFORM_EXTRA[Math.floor(rnd() * PLATFORM_EXTRA.length)]);
+      }
+    }
+    if (cfg.bridges) { layout.bridges.push(BRIDGE_N); layout.bridges.push(BRIDGE_S); }
+
+    // 已占用区域（含间距 0.3m）：箱子/柱/平台/桥洞
+    var placed = [];
+    for (i = 0; i < layout.crates.length; i++) {
+      var cr = layout.crates[i];
+      placed.push({ minX: cr[0] - cr[2] - 0.3, maxX: cr[0] + cr[2] + 0.3, minZ: cr[1] - cr[3] - 0.3, maxZ: cr[1] + cr[3] + 0.3 });
+    }
+    for (i = 0; i < layout.pillars.length; i++) {
+      var pl = layout.pillars[i];
+      placed.push({ minX: pl[0] - 1.9, maxX: pl[0] + 1.9, minZ: pl[1] - 1.9, maxZ: pl[1] + 1.9 });
+    }
+    for (i = 0; i < layout.platforms.length; i++) {
+      var pf = layout.platforms[i];
+      var sz = (pf[2] || 2) / 2 + 0.3;
+      placed.push({ minX: pf[0] - sz, maxX: pf[0] + sz, minZ: pf[1] - sz, maxZ: pf[1] + sz });
+    }
+    for (i = 0; i < layout.bridges.length; i++) {
+      var bd = layout.bridges[i];
+      placed.push({ minX: bd[0] - 3.05, maxX: bd[0] + 3.05, minZ: bd[1] - 1.8, maxZ: bd[1] + 1.8 });
+    }
+    // 玩家周围 3m 清空（重建瞬间不把玩家卡进障碍；构造函数阶段 player 尚未创建则跳过）
+    var pp = this.game.player ? this.game.player.pos : null;
+    if (pp) placed.push({ minX: pp.x - 3.5, maxX: pp.x + 3.5, minZ: pp.z - 3.5, maxZ: pp.z + 3.5 });
+
+    // 矮墙：洗牌后逐个尝试，重叠则跳过
+    var walls = shuffleArr(WALL_SLOTS.slice(), rnd);
+    for (i = 0; i < walls.length && layout.walls.length < cfg.lowWalls; i++) {
+      var w = walls[i];
+      var wb = { minX: w[0] - w[2] / 2 - 0.3, maxX: w[0] + w[2] / 2 + 0.3, minZ: w[1] - 0.55, maxZ: w[1] + 0.55 };
+      var ok = true;
+      for (var p = 0; p < placed.length; p++) {
+        if (boxesOverlap(wb, placed[p])) { ok = false; break; }
+      }
+      if (ok) { layout.walls.push(w); placed.push(wb); }
+    }
+    return layout;
+  }
+
+  /* ---------- 构建 mesh + 碰撞（top/ceil 高度感知） ---------- */
+  buildLayout(layout) {
+    var i;
+    for (i = 0; i < layout.crates.length; i++) {
+      var cr = layout.crates[i];
+      var geo = cr[2] > 1.7 ? this.longGeo : (cr[3] > 1.7 ? this.longGeoZ : this.crateGeo);
+      var cm = new THREE.Mesh(geo, this.crateMat);
+      cm.position.set(cr[0], 1.7, cr[1]);
+      cm.castShadow = cm.receiveShadow = true;
+      this.varGroup.add(cm);
+      this.solidMeshes.push(cm);
+      this.coverMeshes.push(cm);
+      this.boxes.push({ minX: cr[0] - cr[2], maxX: cr[0] + cr[2], minZ: cr[1] - cr[3], maxZ: cr[1] + cr[3] });
+    }
+    for (i = 0; i < layout.pillars.length; i++) {
+      var pl = layout.pillars[i];
+      var pm = new THREE.Mesh(this.pillarGeo, this.pillarMat);
+      pm.position.set(pl[0], 4, pl[1]);
+      pm.castShadow = pm.receiveShadow = true;
+      this.varGroup.add(pm);
+      this.solidMeshes.push(pm);
+      this.coverMeshes.push(pm);
+      this.cylinders.push({ x: pl[0], z: pl[1], r: 1.6 });
+    }
+    for (i = 0; i < layout.walls.length; i++) {
+      var w = layout.walls[i];
+      var wm = new THREE.Mesh(new THREE.BoxGeometry(w[2], 1.35, 0.5), this.wallMat);
+      wm.position.set(w[0], 0.675, w[1]);
+      wm.castShadow = wm.receiveShadow = true;
+      this.varGroup.add(wm);
+      this.solidMeshes.push(wm);
+      this.coverMeshes.push(wm);
+      var wb = { minX: w[0] - w[2] / 2, maxX: w[0] + w[2] / 2, minZ: w[1] - 0.25, maxZ: w[1] + 0.25, top: 1.35 };
+      this.boxes.push(wb);
+      this.platforms.push(wb);
+    }
+    for (i = 0; i < layout.platforms.length; i++) {
+      var pf = layout.platforms[i];
+      var size = pf[2] || 2;
+      var pm2 = new THREE.Mesh(new THREE.BoxGeometry(size, 1.0, size), this.platformMat);
+      pm2.position.set(pf[0], 0.5, pf[1]);
+      pm2.castShadow = pm2.receiveShadow = true;
+      this.varGroup.add(pm2);
+      var edge = new THREE.Mesh(new THREE.BoxGeometry(size + 0.22, 0.05, size + 0.22), this.platformEdgeMat);
+      edge.position.set(pf[0], 1.025, pf[1]);
+      this.varGroup.add(edge);
+      this.solidMeshes.push(pm2);
+      this.coverMeshes.push(pm2);
+      this.coverMeshes.push(edge);
+      var pb = { minX: pf[0] - size / 2, maxX: pf[0] + size / 2, minZ: pf[1] - size / 2, maxZ: pf[1] + size / 2, top: 1.0 };
+      this.boxes.push(pb);
+      this.platforms.push(pb);
+    }
+    for (i = 0; i < layout.bridges.length; i++) {
+      var bd = layout.bridges[i];
+      var cx = bd[0], cz = bd[1];
+      var roof = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.3, 3), this.bridgeMat);
+      roof.position.set(cx, 1.45, cz);
+      roof.castShadow = roof.receiveShadow = true;
+      this.varGroup.add(roof);
+      var b1 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 3), this.bridgeMat);
+      b1.position.set(cx - 2, 1.5, cz);
+      var b2 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 3), this.bridgeMat);
+      b2.position.set(cx + 2, 1.5, cz);
+      b1.castShadow = b1.receiveShadow = b2.castShadow = b2.receiveShadow = true;
+      this.varGroup.add(b1); this.varGroup.add(b2);
+      this.solidMeshes.push(roof, b1, b2);
+      this.coverMeshes.push(roof, b1, b2);
+      // 通道区：实体判定恒不挡（top:-1）+ 压板挡站姿（ceil 1.3，蹲伏 1.15 可过）
+      this.boxes.push({ minX: cx - 1.25, maxX: cx + 1.25, minZ: cz - 1.5, maxZ: cz + 1.5, top: -1, ceil: 1.3 });
+      // 侧柱碰撞（恒实心，敌人绕行）
+      this.boxes.push({ minX: cx - 2.75, maxX: cx - 1.25, minZ: cz - 1.5, maxZ: cz + 1.5 });
+      this.boxes.push({ minX: cx + 1.25, maxX: cx + 2.75, minZ: cz - 1.5, maxZ: cz + 1.5 });
+    }
+  }
+
+  /* ---------- 该处地面眼睛基准高度（落地判定用） ---------- */
+  groundEye(x, z) {
+    var h = 0;
+    for (var i = 0; i < this.platforms.length; i++) {
+      var p = this.platforms[i];
+      if (x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ && p.top > h) h = p.top;
+    }
+    return PlayerConfig.EYE + h;
+  }
+
+  /* ---------- 压板检测（桥洞内站起限制） ---------- */
+  ceilBlockAt(x, z, eyeY) {
+    for (var i = 0; i < this.boxes.length; i++) {
+      var b = this.boxes[i];
+      if (b.ceil === undefined) continue;
+      if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ && eyeY > b.ceil) return true;
+    }
+    return false;
+  }
+
+  /* ---------- 可达性兜底：2m 网格 BFS，玩家与中央高台须能到达场地四边 ---------- */
+  reachableFor(layout) {
+    var N = 55, CELL = 2.0, OFF = 55;
+    var blocked = new Uint8Array(N * N);
+    function markBox(b, pad) {
+      pad = pad || 1.0;
+      var x0 = Math.max(0, Math.floor((b.minX - pad + OFF) / CELL));
+      var x1 = Math.min(N - 1, Math.floor((b.maxX + pad + OFF) / CELL));
+      var z0 = Math.max(0, Math.floor((b.minZ - pad + OFF) / CELL));
+      var z1 = Math.min(N - 1, Math.floor((b.maxZ + pad + OFF) / CELL));
+      for (var x = x0; x <= x1; x++) for (var z = z0; z <= z1; z++) blocked[z * N + x] = 1;
+    }
+    var i;
+    for (i = 0; i < layout.crates.length; i++) {
+      var cr = layout.crates[i];
+      markBox({ minX: cr[0] - cr[2], maxX: cr[0] + cr[2], minZ: cr[1] - cr[3], maxZ: cr[1] + cr[3] });
+    }
+    for (i = 0; i < layout.pillars.length; i++) {
+      var pl = layout.pillars[i];
+      markBox({ minX: pl[0] - 1.6, maxX: pl[0] + 1.6, minZ: pl[1] - 1.6, maxZ: pl[1] + 1.6 });
+    }
+    for (i = 0; i < layout.walls.length; i++) {
+      var w = layout.walls[i];
+      markBox({ minX: w[0] - w[2] / 2, maxX: w[0] + w[2] / 2, minZ: w[1] - 0.25, maxZ: w[1] + 0.25 });
+    }
+    for (i = 0; i < layout.platforms.length; i++) {
+      var pf = layout.platforms[i];
+      var sz = (pf[2] || 2) / 2;
+      markBox({ minX: pf[0] - sz, maxX: pf[0] + sz, minZ: pf[1] - sz, maxZ: pf[1] + sz });
+    }
+    for (i = 0; i < layout.bridges.length; i++) {
+      var bd = layout.bridges[i];
+      markBox({ minX: bd[0] - 2.75, maxX: bd[0] + 2.75, minZ: bd[1] - 1.5, maxZ: bd[1] + 1.5 });
+    }
+    function bfsReachesEdge(sx, sz) {
+      if (blocked[sz * N + sx]) return false;
+      var seen = new Uint8Array(N * N);
+      var q = [sx, sz]; seen[sz * N + sx] = 1;
+      var head = 0;
+      while (head < q.length) {
+        var x = q[head++], z = q[head++];
+        if (x === 0 || z === 0 || x === N - 1 || z === N - 1) return true;
+        if (x > 0 && !blocked[z * N + x - 1] && !seen[z * N + x - 1]) { seen[z * N + x - 1] = 1; q.push(x - 1, z); }
+        if (x < N - 1 && !blocked[z * N + x + 1] && !seen[z * N + x + 1]) { seen[z * N + x + 1] = 1; q.push(x + 1, z); }
+        if (z > 0 && !blocked[(z - 1) * N + x] && !seen[(z - 1) * N + x]) { seen[(z - 1) * N + x] = 1; q.push(x, z - 1); }
+        if (z < N - 1 && !blocked[(z + 1) * N + x] && !seen[(z + 1) * N + x]) { seen[(z + 1) * N + x] = 1; q.push(x, z + 1); }
+      }
+      return false;
+    }
+    function nearestFree(px, pz) {
+      if (!blocked[pz * N + px]) return [px, pz];
+      var best = null, bd = 1e9;
+      for (var x = 0; x < N; x++) for (var z = 0; z < N; z++) {
+        if (blocked[z * N + x]) continue;
+        var d = (x - px) * (x - px) + (z - pz) * (z - pz);
+        if (d < bd) { bd = d; best = [x, z]; }
+      }
+      return best || [px, pz];
+    }
+    var pp = this.game.player.pos;
+    var s = nearestFree(clamp(Math.floor((pp.x + OFF) / CELL), 0, N - 1),
+      clamp(Math.floor((pp.z + OFF) / CELL), 0, N - 1));
+    if (!bfsReachesEdge(s[0], s[1])) return false;
+    // 中央高台（layout 第一个平台）周边可达（边外 2m 取点，避开垫片边界格）
+    if (layout.platforms.length) {
+      var cp = layout.platforms[0];
+      var csz = (cp[2] || 2) / 2;
+      var edges = [
+        [cp[0] + csz + 2, cp[1]], [cp[0] - csz - 2, cp[1]],
+        [cp[0], cp[1] + csz + 2], [cp[0], cp[1] - csz - 2]
+      ];
+      var ok = false;
+      for (var e = 0; e < edges.length; e++) {
+        var ex = clamp(Math.floor((edges[e][0] + OFF) / CELL), 0, N - 1);
+        var ez = clamp(Math.floor((edges[e][1] + OFF) / CELL), 0, N - 1);
+        if (!blocked[ez * N + ex] && bfsReachesEdge(ex, ez)) { ok = true; break; }
+      }
+      if (!ok) return false;
+    }
+    return true;
   }
 }
+
 
 /* ======================= 玩家配置表（集中所有可调数值） ======================= */
 var PlayerConfig = {
@@ -1556,6 +1879,8 @@ var PlayerConfig = {
   LOW_HP: 30,
   // 武器联动
   AIR_SPREAD_PENALTY: 0.008, CROUCH_SPREAD_MULT: 0.7,
+  // 地形
+  MELEE_HEIGHT_GAP: 0.8,   // 近战可命中的高度差上限（平台上防隔空打）
   // 死亡镜头
   DEATH_CAM_TIME: 0.9,
   // 灵敏度
@@ -1645,8 +1970,14 @@ class Player {
     var f = (inp.has('KeyW') ? 1 : 0) - (inp.has('KeyS') ? 1 : 0);
     var r = (inp.has('KeyD') ? 1 : 0) - (inp.has('KeyA') ? 1 : 0);
 
-    // ---- 蹲伏（C 键切换） ----
-    if (inp.justPressed.has('KeyC')) this.crouching = !this.crouching;
+    // ---- 蹲伏（C 键切换，桥洞压板下禁止站起） ----
+    if (inp.justPressed.has('KeyC')) {
+      if (this.crouching) {
+        if (game.map.ceilBlockAt(this.pos.x, this.pos.z, this.pos.y)) {
+          game.showToast('此处太矮，无法站起');
+        } else this.crouching = false;
+      } else this.crouching = true;
+    }
 
     // ---- 冲刺（按住 Shift，消耗耐力） ----
     var wantSprint = (inp.has('ShiftLeft') || inp.has('ShiftRight')) && f > 0
@@ -1700,14 +2031,16 @@ class Player {
         this.knockVelX = 0; this.knockVelZ = 0;
       }
     }
-    resolveCircle(this.pos, PlayerConfig.RADIUS, game.map.colliders.boxes, game.map.colliders.cylinders);
+    resolveCircle(this.pos, PlayerConfig.RADIUS, game.map.colliders.boxes, game.map.colliders.cylinders,
+      { bottom: this.pos.y - PlayerConfig.EYE, eyeY: this.pos.y + this.eyeOff });   // 高度感知（跳跃越台 / 蹲伏钻洞）
     this.pos.x = clamp(this.pos.x, -55.4, 55.4);
     this.pos.z = clamp(this.pos.z, -55.4, 55.4);
     this.pos.y += this.vel.y * dt;
     var wasAir = !this._wasOnGround;
-    if (this.pos.y <= PlayerConfig.EYE) {
+    var gEye = game.map.groundEye(this.pos.x, this.pos.z);   // 该处地面眼睛基准高度（平台顶可站立）
+    if (this.pos.y <= gEye) {
       var fallVel = this.vel.y;                    // 落地瞬间下落速度（负值）
-      this.pos.y = PlayerConfig.EYE;
+      this.pos.y = gEye;
       this.vel.y = 0;
       this.onGround = true;
       if (wasAir) this.onLand(-fallVel, game);     // 落地反馈
@@ -1923,6 +2256,15 @@ class Game {
         self.sens = clamp(v, PlayerConfig.SENS_MIN, PlayerConfig.SENS_MAX);
         self.sensVal.textContent = self.sens.toFixed(1);
         try { localStorage.setItem('fps_sensitivity', String(self.sens)); } catch (e) { /* 忽略 */ }
+      },
+      regenerateMap: function () {
+        // 手动重抽地形（随机种子）
+        self.map.rebuild(Math.floor(Math.random() * 1e9) + 1);
+        var bt = self.map.coverMeshes.slice();
+        var act = self.enemies.active;
+        for (var i = 0; i < act.length; i++) bt.push(act[i].body, act[i].head);
+        self.bulletTargets = bt;
+        self.showToast('地形已重抽');
       }
     };
   }
@@ -2047,6 +2389,16 @@ class Game {
     if (this.state === 'dying' || this.state === 'gameover') return;
     this.state = 'dying';
     this.dyingT = 0;
+  }
+
+  /* 每波重建地图：程序化生成可变地形 + 重建子弹目标（保留场上敌人） */
+  rebuildMap() {
+    this.map.rebuild(this.enemies.wave);
+    var bt = this.map.coverMeshes.slice();
+    var act = this.enemies.active;
+    for (var i = 0; i < act.length; i++) bt.push(act[i].body, act[i].head);
+    this.bulletTargets = bt;
+    this.showToast('地形已更新');
   }
 
   gameOver() {
