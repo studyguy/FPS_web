@@ -688,7 +688,8 @@ class BulletPool {
       var dmg = b.damage * (o.userData.head ? 2 : 1);
       enemy.takeDamage(dmg, o.userData.head, game, b.dir);
       if (b.knock > 0 && enemy.state === 'active') {
-        enemy.group.position.addScaledVector(b.dir, b.knock);   // 霰弹击退
+        enemy.group.position.x += b.dir.x * b.knock;   // 霰弹击退（仅水平）
+        enemy.group.position.z += b.dir.z * b.knock;
       }
       game.player.stunBreakByEnemy(enemy);   // 射击受控来源本体 → 挣脱
       game.showHitmarker();
@@ -1691,6 +1692,7 @@ class Enemy {
     resolveCircle(pos, this.bodyRadius, game.map.colliders.boxes, game.map.colliders.cylinders);
     pos.x = clamp(pos.x, -55.3, 55.3);
     pos.z = clamp(pos.z, -55.3, 55.3);
+    pos.y = 0;   // 敌人恒在地面（防御：防任何位移/击退把敌人压入地下穿模）
     return false;
   }
   takeDamage(dmg, head, game, bulletDir) {
@@ -1698,7 +1700,10 @@ class Enemy {
     this.hp -= dmg;
     this.hitFlash = 0.12;
     this.setEmissive(1);                              // 受击闪红
-    if (bulletDir) this.group.position.addScaledVector(bulletDir, 0.25); // 击退
+    if (bulletDir) {   // 击退（仅水平分量，防高处射击把敌人压入地下）
+      this.group.position.x += bulletDir.x * 0.25;
+      this.group.position.z += bulletDir.z * 0.25;
+    }
     if (this.hp <= 0) this.die(game);
   }
   die(game) {
