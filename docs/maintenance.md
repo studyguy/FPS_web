@@ -80,7 +80,14 @@ git push origin v1.1.0
   ```
   （`_check.js` 等临时文件已在 .gitignore 中，不会入库）
 - **功能自检**：F12 控制台使用 `__game.debug.spawnWave(7)`、`__game.debug.teleportEnemyNear('brute', 3)`、`__game.debug.heal()` 快速验证
-- **自动化测试**：临时编写 `_selftest*.html`（iframe 加载游戏 + 模拟点击按键），用无头 Chrome 验证后删除
+- **自动化测试**：`node _node_test.js`（假 DOM + 真实 THREE，200+ 断言；含 v2.0 地牢模式房间生成/门解锁/金币/通关测试），全部 PASS 后再提交
+
+## 7.5 地牢模式结构（v2.0）
+
+- 主模式为房间制闯关：3 大关 ×（4 战斗房 + 1 补给房 + 1 Boss 房），配置在 `ACT_THEME` / `ROOM_TABLE`
+- 房间流程：`Game.enterRoom(act, room)` → 清场判定 `Game.roomUpdate` → `Game.roomCleared()`（解锁出口门）→ 玩家走进拱门触发 `Game.advanceRoom()`
+- 敌人缩放按全局房间序号（`dungeonLevel`）；波次生存（endless）路径保留在 `EnemyManager.update`，未启用
+- 大关 Boss 复用坦克骨架（`EnemyManager.spawnBoss`），按大关 `bossScale` 缩放
 
 ## 8. 注意事项
 
