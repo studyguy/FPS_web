@@ -57,6 +57,33 @@
   .sensRow .sensBtn:hover { transform: scale(1.06); }
   .sensRow #sensVal { min-width: 54px; text-align: center; font-weight: 700; color: #ffd94a;
     font-variant-numeric: tabular-nums; }
+
+  /* 被控挣脱提示条 */
+  #stunBar { position: fixed; left: 50%; bottom: 22%; transform: translateX(-50%);
+    background: rgba(120,10,10,.72); border: 1px solid rgba(255,90,70,.7); border-radius: 10px;
+    padding: 10px 22px; font-size: 16px; font-weight: 700; color: #ffd9d0; letter-spacing: 2px;
+    text-shadow: 0 0 8px rgba(255,60,40,.8); opacity: 0; transition: opacity .15s; white-space: nowrap; }
+  #stunBar.show { opacity: 1; }
+  #stunBar .sb-prog { display: block; height: 4px; margin-top: 6px; background: rgba(255,255,255,.18);
+    border-radius: 2px; overflow: hidden; }
+  #stunBar .sb-prog i { display: block; height: 100%; width: 0; background: linear-gradient(90deg,#ffb84d,#ff5a3d);
+    transition: width .1s linear; }
+
+  /* 胆汁糊屏（Boomer 机制：grunt 死亡溅射） */
+  #boogerOverlay { position: fixed; inset: 0; z-index: 47; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, rgba(90,160,40,0) 40%,
+      rgba(120,190,50,.45) 78%, rgba(60,120,20,.6) 100%); }
+
+  /* Tank Boss 血条 */
+  #bossBarWrap { position: fixed; left: 50%; top: 18px; transform: translateX(-50%);
+    width: min(560px, 60vw); opacity: 0; transition: opacity .3s; z-index: 41; }
+  #bossBarWrap.show { opacity: 1; }
+  #bossBarWrap .boss-lbl { text-align: center; color: #ff6a5e; font-size: 15px; font-weight: 800;
+    letter-spacing: 6px; text-shadow: 0 0 10px rgba(255,60,40,.8); margin-bottom: 5px; }
+  #bossBarWrap .boss-bg { height: 16px; background: rgba(60,8,8,.8); border: 1px solid rgba(255,90,60,.6);
+    border-radius: 8px; overflow: hidden; }
+  #bossBar { height: 100%; width: 100%; background: linear-gradient(90deg,#b32020,#ff5a3d);
+    border-radius: 8px; transition: width .1s linear; }
   #ammoText { min-width: 74px; text-align: right; }
   #ammoText.reloading { color: #ffb84d; }
 
@@ -182,6 +209,9 @@
 <div id="damageOverlay"></div>
 <div id="hitFlash"></div>
 <div id="dmgDir"><div class="arc"></div></div>
+<div id="boogerOverlay"></div>
+<div id="stunBar">连按 空格 挣脱！<span class="sb-prog"><i id="stunProg"></i></span></div>
+<div id="bossBarWrap"><div class="boss-lbl">⚠ 坦克</div><div class="boss-bg"><div id="bossBar"></div></div></div>
 
 <!-- 开始界面 -->
 <div id="startScreen" class="screen">
@@ -202,6 +232,7 @@
   <button id="startBtn" class="btn">点击开始</button>
   <p class="tip">点击后鼠标将被锁定用于控制视角，按 Esc 可暂停</p>
   <p class="tip" style="color:rgba(150,200,230,.75)">地形随波次变化：低台/跳台可上（近战能打到你）· 矮墙可翻不可站 · 第 7 波中央升起能量高台（小心射手）· 桥洞蹲伏可钻</p>
+  <p class="tip" style="color:rgba(255,180,150,.8)">敌人技能（L4D2 式）：疾行者会飞扑压制（蹲伏可躲，被压连按空格挣脱）· 射手会舌头拉拽（蹲伏/掩体可躲，射断舌头挣脱）· 重装兵会冲锋（引它撞墙会自晕）· 第 8 波起有坦克 Boss（投石可打高台）</p>
 </div>
 
 <!-- 暂停界面 -->
@@ -587,10 +618,20 @@ class BulletPool {
   }
   handleHit(hit, b, game) {
     var o = hit.object;
+    if (o.userData.tongue) {   // 射手舌头：射断挣脱
+      var t = o.userData.tongue;
+      t.hp -= 34 * (o.userData.head ? 2 : 1);
+      game.showHitmarker();
+      game.audio.playHit();
+      game.particles.burst(hit.point, 'spark', 4, 2.5, 0.3);
+      if (t.hp <= 0) game.enemies.breakTongue(t);
+      return;
+    }
     if (o.userData.enemy) {   // 命中敌人（爆头 2 倍伤害）
       var enemy = o.userData.enemy;
       var dmg = 34 * (o.userData.head ? 2 : 1);
       enemy.takeDamage(dmg, o.userData.head, game, b.dir);
+      game.player.stunBreakByEnemy(enemy);   // 射击受控来源本体 → 挣脱
       game.showHitmarker();
       game.audio.playHit();
       game.particles.burst(hit.point, 'blood', 5, 2.6, 0.35);
@@ -615,7 +656,8 @@ class ParticlePool {
     this.mats = {
       spark: new THREE.MeshBasicMaterial({ color: 0xffc066, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
       blood: new THREE.MeshBasicMaterial({ color: 0xff3333, transparent: true, depthWrite: false, fog: false }),
-      flash: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+      flash: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
+      booger: new THREE.MeshBasicMaterial({ color: 0x8ac43a, transparent: true, depthWrite: false, fog: false })
     };
     var geo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
     for (var i = 0; i < max; i++) {
@@ -840,7 +882,8 @@ var ENEMY_TYPES = {
   grunt:   { scale: 1.0, body: 0x8f2b2b, head: 0x6e1f1f, eye: 0xff2200, label: '突击兵' },
   runner:  { scale: 0.8, body: 0xc85a1e, head: 0x9a4416, eye: 0xffcc00, label: '疾行者' },
   brute:   { scale: 1.5, body: 0x4a3038, head: 0x38242b, eye: 0xff5500, label: '重装兵' },
-  shooter: { scale: 1.0, body: 0x5a2a8f, head: 0x46206e, eye: 0x00ccff, label: '射手' }
+  shooter: { scale: 1.0, body: 0x5a2a8f, head: 0x46206e, eye: 0x00ccff, label: '射手' },
+  tank:    { scale: 2.2, body: 0x5c1f1f, head: 0x3f1313, eye: 0xff4400, label: '坦克' }
 };
 
 class Enemy {
@@ -904,10 +947,18 @@ class Enemy {
     this.knockback = 0; this.score = 100;
     this.wave = 1;
     this.bodyRadius = 0.55;
-    this.phase = 'chase'; this.phaseT = 0;   // chase 追击 | windup 攻击前摇 | recover 硬直
+    this.phase = 'chase'; this.phaseT = 0;   // chase 追击 | windup 攻击前摇 | recover 硬直 | stunned 自晕
     this.attackTimer = 1;
     this.stuck = 0; this.stuckT = 0;         // 卡死检测（横向滑动脱困）
     this.lastPos = new THREE.Vector3();
+    // L4D2 融合技能状态
+    this.skill = null;                        // 蓄力类型：'pounce'/'charge'/'rock'/null
+    this.skillHinted = false;                 // 技能首次横幅提示
+    this.pounceT = 0; this.pounceVx = 0; this.pounceVz = 0; this.pounceCd = 0;
+    this.chargeT = 0; this.chargeVx = 0; this.chargeVz = 0; this.chargeCd = 0;
+    this.stunPhaseT = 0;                      // stunned 自晕剩余
+    this.tongueCd = 0; this.attackKind = 'orb';
+    this.speedBoostT = 0; this.speedBoost = 1;
   }
   /** 应用类型外观（体型缩放 + 配色 + 眼部颜色） */
   applyType(type) {
@@ -943,7 +994,37 @@ class Enemy {
     this.attackAnim = 0;
     this.stuck = 0; this.stuckT = 0;
     this.lastPos.copy(this.group.position);
+    // L4D2 融合技能参数（cfg 填充）
+    this.skill = null; this.skillHinted = false;
+    this.pounceT = 0; this.pounceVx = 0; this.pounceVz = 0; this.pounceCd = 0;
+    this.pounceRange = cfg.pounceRange || 0; this.pounceSpeed = cfg.pounceSpeed || 0;
+    this.pounceDur = cfg.pounceDur || 0; this.pounceCdMax = cfg.pounceCd || 0;
+    this.pounceStun = cfg.pounceStun || 0;
+    this.chargeT = 0; this.chargeVx = 0; this.chargeVz = 0; this.chargeCd = 0;
+    this.chargeRange = cfg.chargeRange || 0; this.chargeSpeed = cfg.chargeSpeed || 0;
+    this.chargeDur = cfg.chargeDur || 0; this.chargeCdMax = cfg.chargeCd || 0;
+    this.chargeStun = cfg.chargeStun || 0; this.chargeHit = cfg.chargeHit || 0;
+    this.chargePush = cfg.chargePush || 0;
+    this.tongueCd = 0; this.tongueCdMax = cfg.tongueCd || 0; this.attackKind = 'orb';
+    this.tongueRange = cfg.tongueRange || 0; this.tongueStun = cfg.tongueStun || 0;
+    this.tonguePull = cfg.tonguePull || 0; this.tongueHp = cfg.tongueHp || 0;
+    this.explodeChance = cfg.explodeChance || 0; this.explodeRange = cfg.explodeRange || 2.5;
+    this.explodeWave = cfg.explodeWave || 99;
+    this.rockCdMax = cfg.rockCd || 0; this.rockRange = cfg.rockRange || 0;
+    this.rockDmg = cfg.rockDmg || 0; this.rockAoe = cfg.rockAoe || 0;
+    this.stunPhaseT = 0;
+    this.speedBoostT = 0; this.speedBoost = 1;
     this.setEmissive(0);
+  }
+  /** 技能首次使用的横幅提示（L4D2 式预警） */
+  skillHint(game) {
+    if (this.skillHinted) return;
+    this.skillHinted = true;
+    var label = (ENEMY_TYPES[this.type] || {}).label || this.type;
+    if (this.skill === 'pounce') game.showBanner('⚠ ' + label + '准备扑击！');
+    else if (this.skill === 'charge') game.showBanner('⚠ ' + label + '准备冲锋！');
+    else if (this.skill === 'rock') game.showBanner('⚠ 坦克投石！');
+    else if (this.type === 'shooter') game.showBanner('⚠ ' + label + '吐出舌头！');
   }
   /** 视线检测：敌人到玩家之间是否被掩体/墙壁挡住
       注意：部分环境下 Raycaster.far 不可靠，这里手动按距离过滤命中 */
@@ -972,10 +1053,20 @@ class Enemy {
     this.armL.rotation.x = armSwing;
     this.armR.rotation.x = armSwing;
   }
-  /** 近战 AI：追击 -> 前摇(红光预警) -> 命中/落空 -> 硬直 */
+  /** 近战 AI：追击 -> 前摇(红光预警) -> 命中/落空 -> 硬直
+      L4D2 融合：runner 扑击压制 / brute 冲锋撞墙自晕 */
   updateMelee(dt, game, dist, dx, dz) {
     var pos = this.group.position;
     var los = this.hasLOS(game, dist);
+
+    if (this.phase === 'pounce') { this.updatePounce(dt, game, dist); return; }
+    if (this.phase === 'charging') { this.updateCharge(dt, game, dist); return; }
+    if (this.phase === 'stunned') {
+      this.stunPhaseT -= dt;
+      this.walkAnim(dt, false);
+      if (this.stunPhaseT <= 0) this.phase = 'chase';
+      return;
+    }
 
     if (this.phase === 'windup') {
       // 前摇：站定蓄力，双臂高抬 + 全身红光（玩家可走位躲开）
@@ -983,20 +1074,29 @@ class Enemy {
       this.armL.rotation.x = -2.3;
       this.armR.rotation.x = -2.3;
       if (this.phaseT <= 0) {
-        // 近战高度差判定：玩家站平台上时脚下敌人无法隔空命中
-        var hDiff = Math.abs((game.player.pos.y - PlayerConfig.EYE) - pos.y);
-        if (dist <= this.attackRange && los && hDiff < PlayerConfig.MELEE_HEIGHT_GAP && game.state === 'playing') {
-          game.player.takeDamage(this.damage, { knockback: this.knockback, from: pos });
-          if (this.lunge > 0) {                       // 攻击突进，反风筝
-            var inv = dist > 0.0001 ? 1 / dist : 0;
-            pos.x += dx * inv * this.lunge;
-            pos.z += dz * inv * this.lunge;
+        if (this.skill === 'pounce') {
+          this.startPounce(dx, dz, dist);       // phase 已切为 'pounce'，跳过下方收尾
+        } else if (this.skill === 'charge') {
+          this.startCharge(dx, dz, dist);       // phase 已切为 'charging'
+        } else {
+          // 近战高度差判定：玩家站平台上时脚下敌人无法隔空命中
+          var hDiff = Math.abs((game.player.pos.y - PlayerConfig.EYE) - pos.y);
+          if (dist <= this.attackRange && los && hDiff < PlayerConfig.MELEE_HEIGHT_GAP && game.state === 'playing') {
+            game.player.takeDamage(this.damage, { knockback: this.knockback, from: pos });
+            if (this.lunge > 0) {                       // 攻击突进，反风筝
+              var inv = dist > 0.0001 ? 1 / dist : 0;
+              pos.x += dx * inv * this.lunge;
+              pos.z += dz * inv * this.lunge;
+            }
+            this.attackAnim = 0.3;                      // 挥击收势
           }
-          this.attackAnim = 0.3;                      // 挥击收势
         }
-        this.phase = 'recover';                       // 命中或落空后的硬直
-        this.phaseT = 0.3;
-        this.attackTimer = this.cooldown;
+        this.skill = null;
+        if (this.phase !== 'pounce' && this.phase !== 'charging') {
+          this.phase = 'recover';                       // 命中或落空后的硬直
+          this.phaseT = 0.3;
+          this.attackTimer = this.cooldown;
+        }
         this.setEmissive(0);
       }
     } else {
@@ -1006,7 +1106,22 @@ class Enemy {
         if (this.phaseT <= 0) this.phase = 'chase';
       }
       if (this.phase === 'chase') {
-        if (los && dist <= this.attackRange) {
+        // 技能优先：runner 扑击 / brute 冲锋
+        if (this.type === 'runner' && this.pounceCd <= 0 && this.attackTimer <= 0
+          && los && dist <= this.pounceRange && dist > 2) {
+          this.skill = 'pounce';
+          this.phase = 'windup';
+          this.phaseT = this.windup;
+          this.setEmissive(1);
+          this.skillHint(game);
+        } else if (this.type === 'brute' && this.chargeCd <= 0 && this.attackTimer <= 0
+          && los && dist <= this.chargeRange && dist > 3) {
+          this.skill = 'charge';
+          this.phase = 'windup';
+          this.phaseT = this.windup;
+          this.setEmissive(1);
+          this.skillHint(game);
+        } else if (los && dist <= this.attackRange) {
           if (this.attackTimer <= 0) {                // 进入攻击前摇
             this.phase = 'windup';
             this.phaseT = this.windup;
@@ -1021,14 +1136,107 @@ class Enemy {
           var px = -vz, pz = vx;
           vx += px * j; vz += pz * j;
           var m = Math.hypot(vx, vz) || 1;
-          vx = vx / m * this.speed; vz = vz / m * this.speed;
+          var spd = this.speed * (this.speedBoostT > 0 ? this.speedBoost : 1);
+          vx = vx / m * spd; vz = vz / m * spd;
           pos.x += vx * dt; pos.z += vz * dt;
           this.walkAnim(dt, true);
         }
       }
     }
   }
-  /** 射手 AI：保持 9~16 距离带，视线通畅时蓄力发射光球 */
+  /* runner 飞扑：直线飞行，命中压制玩家 / 蹲伏可躲 / 扑空硬直 */
+  startPounce(dx, dz, dist) {
+    var inv = dist > 0.0001 ? 1 / dist : 0;
+    this.pounceVx = dx * inv * this.pounceSpeed;
+    this.pounceVz = dz * inv * this.pounceSpeed;
+    this.pounceT = this.pounceDur;
+    this.pounceCd = this.pounceCdMax;
+    this.phase = 'pounce';
+    this.fall.rotation.x = 0.9;      // 扑击姿态（前倾）
+  }
+  updatePounce(dt, game, dist) {
+    var pos = this.group.position;
+    this.pounceT -= dt;
+    var ex = pos.x, ez = pos.z;
+    pos.x += this.pounceVx * dt;
+    pos.z += this.pounceVz * dt;
+    resolveCircle(pos, this.bodyRadius, game.map.colliders.boxes, game.map.colliders.cylinders);
+    var moved = Math.hypot(pos.x - ex, pos.z - ez);
+    var expected = Math.hypot(this.pounceVx * dt, this.pounceVz * dt);
+    var hitWall = moved < expected * 0.5;
+    var pp = game.player.pos;
+    var hd = Math.hypot(pp.x - pos.x, pp.z - pos.z);
+    var hDiff = Math.abs((pp.y - PlayerConfig.EYE) - pos.y);
+    var crouched = game.player.crouching;   // 蹲伏 1.15 < 扑击线 1.5 → 躲开
+    if (!hitWall && hd < 1.2 && !crouched && hDiff < 0.8 && game.state === 'playing') {
+      // 命中：伤害 + 压制（可射击/空格挣脱）
+      game.player.takeDamage(this.damage, { from: pos });
+      game.player.tryStun('runner', this.pounceStun, this);
+      this.pounceT = 0;
+      this.phase = 'recover'; this.phaseT = 0.4;
+      this.attackTimer = this.cooldown;
+      this.setEmissive(0);
+      game.particles.burst(pos, 'blood', 6, 2.5, 0.4);
+    } else if (hitWall || this.pounceT <= 0) {
+      // 扑空/撞墙 → 硬直白打
+      this.pounceT = 0;
+      this.phase = 'recover'; this.phaseT = 0.8;
+      this.attackTimer = this.cooldown;
+      this.setEmissive(0);
+    }
+    this.fall.rotation.x *= Math.exp(-8 * dt);
+    this.walkAnim(dt, false);
+  }
+  /* brute 冲锋：直线冲锋，撞玩家击退硬直 / 撞墙自晕白打 */
+  startCharge(dx, dz, dist) {
+    var inv = dist > 0.0001 ? 1 / dist : 0;
+    this.chargeVx = dx * inv * this.chargeSpeed;
+    this.chargeVz = dz * inv * this.chargeSpeed;
+    this.chargeT = this.chargeDur;
+    this.chargeCd = this.chargeCdMax;
+    this.phase = 'charging';
+    this.fall.rotation.x = 0.7;      // 前倾冲锋姿态
+  }
+  updateCharge(dt, game, dist) {
+    var pos = this.group.position;
+    this.chargeT -= dt;
+    var ex = pos.x, ez = pos.z;
+    pos.x += this.chargeVx * dt;
+    pos.z += this.chargeVz * dt;
+    resolveCircle(pos, this.bodyRadius, game.map.colliders.boxes, game.map.colliders.cylinders);
+    var moved = Math.hypot(pos.x - ex, pos.z - ez);
+    var expected = Math.hypot(this.chargeVx * dt, this.chargeVz * dt);
+    var hitWall = moved < expected * 0.5;
+    var pp = game.player.pos;
+    var hd = Math.hypot(pp.x - pos.x, pp.z - pos.z);
+    var hDiff = Math.abs((pp.y - PlayerConfig.EYE) - pos.y);
+    if (!hitWall && hd < 1.3 && hDiff < 0.8 && game.state === 'playing') {
+      // 撞到玩家：伤害 + 击退 + 玩家硬直（可立即反击）
+      game.player.takeDamage(this.chargeHit, { from: pos, knockback: this.chargePush });
+      game.player.tryStun('brute', 0.6, this);
+      this.chargeT = 0;
+      this.phase = 'recover'; this.phaseT = 0.8;
+      this.attackTimer = this.cooldown;
+      this.setEmissive(0);
+      game.particles.burst(pos, 'blood', 6, 2.5, 0.4);
+    } else if (hitWall || this.chargeT <= 0) {
+      this.chargeT = 0;
+      if (hitWall) {
+        // 撞墙自晕（白打窗口）
+        this.phase = 'stunned';
+        this.stunPhaseT = this.chargeStun;
+        game.particles.burst(pos, 'spark', 10, 3, 0.35);
+      } else {
+        this.phase = 'recover';
+        this.phaseT = 0.4;
+      }
+      this.attackTimer = this.cooldown;
+      this.setEmissive(0);
+    }
+    this.fall.rotation.x *= Math.exp(-8 * dt);
+    this.walkAnim(dt, false);
+  }
+  /** 射手 AI：保持 9~16 距离带；L4D2 融合：光球 / 舌头拉拽交替 */
   updateShooter(dt, game, dist, dx, dz) {
     var pos = this.group.position;
     var los = this.hasLOS(game, dist);
@@ -1038,9 +1246,12 @@ class Enemy {
       this.armL.rotation.x = -2.0;                    // 蓄力姿态
       this.armR.rotation.x = -2.0;
       if (this.phaseT <= 0) {
-        if (los && dist < 20 && game.state === 'playing') {
+        if (this.attackKind === 'tongue') {
+          this.fireTongue(game, dist, los);
+        } else if (los && dist < 20 && game.state === 'playing') {
           game.shots.fire(new THREE.Vector3(pos.x, 1.5, pos.z), game.player.pos, this.damage);
         }
+        this.attackKind = 'orb';
         this.phase = 'recover';
         this.phaseT = 0.2;
         this.attackTimer = this.cooldown;
@@ -1066,12 +1277,109 @@ class Enemy {
         pos.x += mvx * dt; pos.z += mvz * dt;
         this.walkAnim(dt, m > 0.01);
         if (los && dist < 20 && this.attackTimer <= 0) {
+          // 舌头冷却好且在射程内 → 舌头拉拽；否则光球
+          this.attackKind = (this.tongueCd <= 0 && this.tongueRange > 0 && dist <= this.tongueRange && dist > 3)
+            ? 'tongue' : 'orb';
+          if (this.attackKind === 'tongue') this.skillHint(game);
           this.phase = 'windup';
           this.phaseT = this.windup;
           this.setEmissive(1);
         }
       }
     }
+  }
+  /* 舌头：水平射线（1.5m 高）——掩体可挡、蹲伏可从头顶飞过；命中束缚+拉拽 */
+  fireTongue(game, dist, los) {
+    this.tongueCd = this.tongueCdMax;
+    if (!los || dist > this.tongueRange || game.state !== 'playing') return;
+    var pos = this.group.position;
+    var pp = game.player.pos;
+    var eyeY = pp.y + game.player.eyeOff;
+    if (eyeY <= 1.35) return;              // 蹲伏 1.15 → 舌头从头顶飞过
+    // 水平射线掩体检测（与射手光球一致）
+    var from = new THREE.Vector3(pos.x, 1.5, pos.z);
+    var dir = new THREE.Vector3(pp.x - pos.x, 0, pp.z - pos.z).normalize();
+    var r = game._ray;
+    r.set(from, dir, 0, Infinity);
+    var hits = r.intersectObjects(game.map.coverMeshes, false);
+    for (var i = 0; i < hits.length; i++) {
+      if (hits[i].distance <= dist) return;   // 被掩体挡住
+    }
+    // 缠住玩家
+    game.enemies.createTongue(this, dist);
+    game.player.tryStun('shooter', this.tongueStun, this);
+  }
+  /** 坦克 Boss AI：追击 + 重拳（近战 AOE）+ 投石（远程，可打平台玩家） */
+  updateTank(dt, game, dist, dx, dz) {
+    var pos = this.group.position;
+    var los = this.hasLOS(game, dist);
+
+    if (this.phase === 'windup') {
+      this.phaseT -= dt;
+      this.armL.rotation.x = -2.5;                    // 挥拳/投石蓄力
+      this.armR.rotation.x = -2.5;
+      if (this.phaseT <= 0) {
+        if (this.skill === 'rock') {
+          this.throwRock(game, dist, los);
+        } else {
+          // 重拳：3m 扇形 AOE（平台玩家高度差 > 1.5 可躲，但会被投石）
+          var hDiff = Math.abs((game.player.pos.y - PlayerConfig.EYE) - pos.y);
+          if (dist <= 3 && los && hDiff < 1.5 && game.state === 'playing') {
+            game.player.takeDamage(this.damage, { from: pos, knockback: this.knockback });
+            game.shake = Math.max(game.shake, 0.4);
+            game.particles.burst(pos, 'spark', 10, 3, 0.4);
+          }
+        }
+        this.skill = null;
+        this.phase = 'recover';
+        this.phaseT = 0.6;
+        this.attackTimer = this.cooldown;
+        this.setEmissive(0);
+      }
+    } else {
+      this.attackTimer -= dt;
+      if (this.phase === 'recover') {
+        this.phaseT -= dt;
+        if (this.phaseT <= 0) this.phase = 'chase';
+      }
+      if (this.phase === 'chase') {
+        // 投石优先（远程，可命中平台玩家；蓄力时玩家脚下出现预警圈）
+        if (this.rockCdMax > 0 && this.attackTimer <= 0 && los && dist <= this.rockRange && dist > 5) {
+          this.skill = 'rock';
+          this.phase = 'windup';
+          this.phaseT = this.windup;
+          this.setEmissive(1);
+          this.skillHint(game);
+          game.rockWarnT = 1.2;                       // 预警圈显示时长（覆盖蓄力+飞行）
+        } else {
+          // 追击 + 重拳
+          var spd = this.speed * (this.speedBoostT > 0 ? this.speedBoost : 1);
+          var vx = dx / dist * spd, vz = dz / dist * spd;
+          var j = Math.sin(game.time * 1.2 + this.seed) * 0.25;
+          var px = -dz / dist, pz = dx / dist;
+          vx += px * j; vz += pz * j;
+          pos.x += vx * dt; pos.z += vz * dt;
+          this.walkAnim(dt, true);
+          if (los && dist <= 3 && this.attackTimer <= 0) {
+            this.phase = 'windup';
+            this.phaseT = this.windup;
+            this.setEmissive(1);
+          }
+        }
+      }
+    }
+  }
+  /* 坦克投石：抛物线石块，落地 AOE（可命中平台玩家） */
+  throwRock(game, dist, los) {
+    this.attackTimer = this.rockCdMax;
+    if (!los || dist > this.rockRange || game.state !== 'playing') return;
+    var pos = this.group.position;
+    game.shots.fireRock(
+      new THREE.Vector3(pos.x, 2.6, pos.z),
+      game.player.pos,
+      this.rockDmg, this.rockAoe, this.wave);
+    game.rockWarnT = 0;
+    game.particles.burst(new THREE.Vector3(pos.x, 2.6, pos.z), 'spark', 4, 2, 0.3);
   }
   /** 返回 true 表示死亡动画结束，应回收 */
   update(dt, game) {
@@ -1091,6 +1399,12 @@ class Enemy {
     }
     if (this.attackAnim > 0) this.attackAnim -= dt;
 
+    // 技能冷却计时
+    if (this.pounceCd > 0) this.pounceCd -= dt;
+    if (this.chargeCd > 0) this.chargeCd -= dt;
+    if (this.tongueCd > 0) this.tongueCd -= dt;
+    if (this.speedBoostT > 0) this.speedBoostT -= dt;
+
     var pos = this.group.position;
     var pp = game.player.pos;
     var dx = pp.x - pos.x, dz = pp.z - pos.z;
@@ -1100,8 +1414,9 @@ class Enemy {
     var yaw = Math.atan2(dx, dz);
     this.group.rotation.y += (yaw - this.group.rotation.y) * Math.min(1, 8 * dt);
 
-    // 类型分派：远程射手 / 近战
-    if (this.type === 'shooter') this.updateShooter(dt, game, dist, dx, dz);
+    // 类型分派：坦克 Boss / 远程射手 / 近战
+    if (this.type === 'tank') this.updateTank(dt, game, dist, dx, dz);
+    else if (this.type === 'shooter') this.updateShooter(dt, game, dist, dx, dz);
     else this.updateMelee(dt, game, dist, dx, dz);
 
     // 卡死检测：采样窗口内净位移过小 -> 强化横向滑动（在追击分支中生效）
@@ -1141,6 +1456,36 @@ class Enemy {
     game.audio.playKill();
     game.particles.burst(this.group.position, 'blood', 10, 3.2, 0.5);
     game.particles.burst(this.group.position, 'flash', 4, 2.5, 0.35);
+
+    // L4D2 融合：grunt 死亡爆炸（w5+ 概率溅射胆汁：糊屏 + 减速 + 附近敌人狂暴）
+    if (this.type === 'grunt' && this.wave >= this.explodeWave && Math.random() < this.explodeChance) {
+      var pp = game.player.pos;
+      var gd = Math.hypot(pp.x - this.group.position.x, pp.z - this.group.position.z);
+      game.particles.burst(this.group.position, 'booger', gd < this.explodeRange ? 14 : 8, 3, 0.6);
+      if (gd < this.explodeRange && game.state === 'playing') {
+        game.player.slowT = 4;                 // 减速 20%
+        game.boogerFx = 1;                     // 糊屏（HUD 绿色 overlay 4s）
+      }
+      var boosted = 0;
+      for (var bi = 0; bi < game.enemies.active.length && boosted < 2; bi++) {
+        var o = game.enemies.active[bi];
+        if (o === this || o.state !== 'active') continue;
+        var od = Math.hypot(o.group.position.x - this.group.position.x, o.group.position.z - this.group.position.z);
+        if (od < 15) { o.speedBoost = 1.3; o.speedBoostT = 5; boosted++; }
+      }
+    }
+    // 坦克击杀：Boss 事件奖励（分数已在 pts 中 + 回满血 + 全弹药）
+    if (this.type === 'tank') {
+      game.tankActive = null;
+      game.player.hp = 100;
+      game.player.dmgTimer = 999;
+      var w = game.weapon;
+      w.ammo = w.magSize; w.reserve = Math.min(600, 150 + this.wave * 20);
+      w.reloading = false;
+      game.showBanner('坦克已被消灭！奖励已发放');
+      game.shake = Math.max(game.shake, 0.5);
+      game.particles.burst(this.group.position, 'flash', 16, 4, 0.6);
+    }
   }
 }
 
@@ -1168,8 +1513,29 @@ class EnemyShotPool {
     b.dir.copy(target).sub(from).normalize();
     b.life = 3;
     b.damage = damage;
+    b.kind = 'orb';
+    b.aoe = 0;
     b.mesh.visible = true;
     b.mesh.position.copy(from);
+    b.mesh.scale.setScalar(1);
+    this.active.push(b);
+  }
+  /* 坦克投石：抛物线石块（直线飞行 + 落地 AOE） */
+  fireRock(from, target, damage, aoe, wave) {
+    var b = this.pool.find(x => !x.active) || this.pool[0];
+    b.active = true;
+    b.pos.copy(from);
+    b.dir.copy(target).sub(from);
+    b.dir.y += 1.6;                     // 略高的弧线轨迹
+    b.dir.normalize();
+    b.life = 2.5;
+    b.damage = damage;
+    b.kind = 'rock';
+    b.aoe = aoe || 2;
+    b.wave = wave || 1;
+    b.mesh.visible = true;
+    b.mesh.position.copy(from);
+    b.mesh.scale.setScalar(1.4);
     this.active.push(b);
   }
   update(dt, game) {
@@ -1184,26 +1550,50 @@ class EnemyShotPool {
         if (hits[h].distance <= seg + 0.02) { hit = hits[h]; break; }
       }
       if (hit) {
-        game.particles.burst(hit.point, 'spark', 4, 2.2, 0.3);
+        if (b.kind === 'rock') this.rockBoom(b, hit.point, game);
+        else game.particles.burst(hit.point, 'spark', 4, 2.2, 0.3);
         this.recycle(b, i);
         continue;
       }
       b.pos.addScaledVector(b.dir, seg);
       b.life -= dt;
-      if (b.life <= 0) { this.recycle(b, i); continue; }
+      if (b.life <= 0) {
+        if (b.kind === 'rock') this.rockBoom(b, b.pos, game);
+        this.recycle(b, i);
+        continue;
+      }
       // 命中玩家（水平球形 + 竖直按眼睛高度判定：蹲伏可躲弹道）
       var pp = game.player.pos;
       var eyeY = pp.y + game.player.eyeOff;
       var ddx = pp.x - b.pos.x, ddz = pp.z - b.pos.z, ddy = eyeY - b.pos.y;
       if (ddx * ddx + ddz * ddz < 0.55 * 0.55 && Math.abs(ddy) < 0.35) {
-        // 传递来源方向（沿弹道反推），供受击方向指示器使用
-        var from = new THREE.Vector3().copy(pp).addScaledVector(b.dir, -1);
-        game.player.takeDamage(b.damage, { from: from });
-        game.particles.burst(b.pos, 'flash', 5, 2.5, 0.3);
+        if (b.kind === 'rock') {
+          // 投石命中：AOE 爆炸（无视蹲伏，范围判定）
+          var fr = new THREE.Vector3().copy(pp).addScaledVector(b.dir, -1);
+          game.player.takeDamage(b.damage, { from: fr });
+          game.shake = Math.max(game.shake, 0.35);
+          game.particles.burst(b.pos, 'spark', 14, 3.5, 0.5);
+        } else {
+          // 传递来源方向（沿弹道反推），供受击方向指示器使用
+          var from = new THREE.Vector3().copy(pp).addScaledVector(b.dir, -1);
+          game.player.takeDamage(b.damage, { from: from });
+          game.particles.burst(b.pos, 'flash', 5, 2.5, 0.3);
+        }
         this.recycle(b, i);
         continue;
       }
       b.mesh.position.copy(b.pos);
+    }
+  }
+  /* 投石落地爆炸：AOE 范围伤害（无视掩体溅射）+ 震动 */
+  rockBoom(b, point, game) {
+    game.particles.burst(point, 'spark', 14, 3.5, 0.5);
+    game.particles.burst(point, 'flash', 5, 3, 0.35);
+    game.shake = Math.max(game.shake, 0.3);
+    var pp = game.player.pos;
+    var d = Math.hypot(pp.x - point.x, pp.z - point.z);
+    if (d < b.aoe && game.state === 'playing') {
+      game.player.takeDamage(b.damage, { from: new THREE.Vector3(point.x, 1, point.z) });
     }
   }
   recycle(b, i) { b.active = false; b.mesh.visible = false; this.active.splice(i, 1); }
@@ -1216,10 +1606,16 @@ class EnemyShotPool {
 /* ======================= 敌人管理（对象池 + 波次 + 类型构成） ======================= */
 /* 各类型基础数值（由波次缩放；range 对射手是射程） */
 var ENEMY_STATS = {
-  grunt:   { hp: 100, speed: 2.6, damage: 10, range: 2.6, cooldown: 0.9, windup: 0.35, lunge: 0.7, knockback: 0,   score: 100 },
-  runner:  { hp: 60,  speed: 4.3, damage: 6,  range: 1.9, cooldown: 0.7, windup: 0.25, lunge: 0.9, knockback: 0,   score: 130 },
-  brute:   { hp: 300, speed: 1.6, damage: 22, range: 2.8, cooldown: 1.4, windup: 0.5,  lunge: 1.0, knockback: 1.2, score: 250 },
-  shooter: { hp: 80,  speed: 2.0, damage: 8,  range: 22,  cooldown: 2.2, windup: 0.5,  lunge: 0,   knockback: 0,   score: 160 }
+  grunt:   { hp: 100, speed: 2.6, damage: 10, range: 2.6, cooldown: 0.9, windup: 0.35, lunge: 0.7, knockback: 0,   score: 100,
+             explodeChance: 0.3, explodeRange: 2.5, explodeWave: 5 },
+  runner:  { hp: 60,  speed: 4.3, damage: 6,  range: 1.9, cooldown: 0.7, windup: 0.25, lunge: 0.9, knockback: 0,   score: 130,
+             pounceRange: 8, pounceSpeed: 12, pounceDur: 0.5, pounceCd: 3, pounceStun: 1.2 },
+  brute:   { hp: 300, speed: 1.6, damage: 22, range: 2.8, cooldown: 1.4, windup: 0.5,  lunge: 1.0, knockback: 1.2, score: 250,
+             chargeRange: 15, chargeSpeed: 10, chargeDur: 0.6, chargeCd: 6, chargeStun: 1.5, chargeHit: 10, chargePush: 3 },
+  shooter: { hp: 80,  speed: 2.0, damage: 8,  range: 22,  cooldown: 2.2, windup: 0.5,  lunge: 0,   knockback: 0,   score: 160,
+             tongueRange: 14, tongueCd: 4, tongueStun: 1.5, tonguePull: 2, tongueHp: 30 },
+  tank:    { hp: 2500, speed: 2.2, damage: 30, range: 3, cooldown: 2.2, windup: 0.55, lunge: 0, knockback: 4, score: 2000,
+             rockCd: 8, rockRange: 22, rockDmg: 25, rockAoe: 2 }
 };
 /* 波次构成：[突击兵, 疾行者, 重装兵, 射手]；11 波起按公式增长，单波上限 26 只 */
 var WAVE_TABLE = [
@@ -1246,13 +1642,96 @@ class EnemyManager {
       this.pool.push(e);
     }
     this.active = [];
+    this.tongues = [];           // 射手舌头实体列表
+    this.tank = new Enemy();     // 坦克（独立事件 Boss，不占普通池）
+    game.scene.add(this.tank.group);
+    this.tankActive = null;
+    this.tankEventPending = false;
     this.wave = 0;
     this.spawnList = [];
     this.spawnTimer = 0;
     this.between = false;
     this.waveDelay = 0;
   }
-  /** 类型基础数值 × 波次缩放 */
+  /* Tank 事件波：刷 Boss + 警报 + 震动 */
+  spawnTankEvent() {
+    var game = this.game;
+    var t = this.tank;
+    var pos = this.spawnPos();
+    t.activate(pos, 'tank', this.scaleCfg('tank'));
+    this.active.push(t);
+    game.bulletTargets.push(t.body, t.head);
+    game.tankActive = t;
+    game.showBanner('⚠ 坦克来袭！');
+    game.shake = 0.9;
+  }
+  /* 射手舌头实体：绿色细条 mesh（子弹目标），缠住玩家后拉拽 */
+  createTongue(shooter, dist) {
+    var game = this.game;
+    var t = {
+      hp: shooter.tongueHp,
+      shooter: shooter,
+      pulled: 0,
+      mesh: new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, Math.max(0.4, dist)),
+        new THREE.MeshBasicMaterial({ color: 0x5aff7a })),
+      active: true
+    };
+    t.mesh.userData.tongue = t;
+    t.mesh.visible = true;
+    game.scene.add(t.mesh);
+    game.bulletTargets.push(t.mesh);
+    this.tongues.push(t);
+    return t;
+  }
+  /* 舌头跟随 + 拉拽玩家 */
+  updateTongues(dt) {
+    var game = this.game;
+    for (var i = this.tongues.length - 1; i >= 0; i--) {
+      var t = this.tongues[i];
+      if (!t.active || t.shooter.state !== 'active') {
+        this.removeTongue(t, i);
+        continue;
+      }
+      var s = t.shooter;
+      var from = s.group.position;
+      var pp = game.player.pos;
+      var eyeY = pp.y + game.player.eyeOff;
+      var mx = from.x + (pp.x - from.x) * 0.72;
+      var mz = from.z + (pp.z - from.z) * 0.72;
+      var my = 1.5 + (eyeY - 1.5) * 0.72;
+      t.mesh.position.set(mx, my, mz);
+      t.mesh.lookAt(pp.x, eyeY, pp.z);
+      // 拉拽：束缚期间把玩家拉向射手（拉满 tonguePull 距离）
+      if (game.player.stunT > 0 && game.player.stunFrom === s && t.pulled < s.tonguePull) {
+        var dx = from.x - pp.x, dz = from.z - pp.z;
+        var d = Math.hypot(dx, dz);
+        if (d > 1.2) {
+          var pull = Math.min(4 * dt, s.tonguePull - t.pulled);
+          game.player.pos.x += dx / d * pull;
+          game.player.pos.z += dz / d * pull;
+          t.pulled += pull;
+        }
+      }
+    }
+  }
+  removeTongue(t, idx) {
+    if (idx === undefined) idx = this.tongues.indexOf(t);
+    if (idx < 0) return;
+    this.tongues.splice(idx, 1);
+    t.active = false;
+    t.mesh.visible = false;
+    var bt = this.game.bulletTargets;
+    var bi = bt.indexOf(t.mesh);
+    if (bi >= 0) bt.splice(bi, 1);
+  }
+  /* 舌头被打断（子弹命中舌头实体） */
+  breakTongue(t) {
+    var game = this.game;
+    if (game.player.stunFrom === t.shooter) game.player.releaseStun();
+    t.shooter.attackTimer = t.shooter.cooldown;
+    this.removeTongue(t);
+  }
+  /** 类型基础数值 × 波次缩放（含 L4D2 融合技能随波增强） */
   scaleCfg(type) {
     var s = ENEMY_STATS[type] || ENEMY_STATS.grunt;
     var w = this.wave;
@@ -1262,7 +1741,18 @@ class EnemyManager {
     return {
       hp: Math.round(s.hp * hpMul), speed: spd, damage: Math.round(s.damage * dmgMul),
       range: s.range, cooldown: s.cooldown, windup: s.windup, lunge: s.lunge,
-      knockback: s.knockback, score: s.score, wave: w
+      knockback: s.knockback, score: s.score, wave: w,
+      // 技能（随波小幅增强，封顶防失控）
+      explodeChance: s.explodeChance, explodeRange: s.explodeRange, explodeWave: s.explodeWave,
+      pounceRange: s.pounceRange, pounceSpeed: s.pounceSpeed, pounceDur: s.pounceDur,
+      pounceCd: s.pounceCd, pounceStun: Math.min(1.5, (s.pounceStun || 0) + 0.03 * Math.max(0, w - 3)),
+      chargeRange: s.chargeRange, chargeSpeed: s.chargeSpeed, chargeDur: s.chargeDur,
+      chargeCd: s.chargeCd, chargeStun: Math.min(1.8, (s.chargeStun || 0) + 0.04 * Math.max(0, w - 5)),
+      chargeHit: s.chargeHit, chargePush: s.chargePush,
+      tongueRange: s.tongueRange, tongueCd: s.tongueCd,
+      tongueStun: Math.min(1.8, (s.tongueStun || 0) + 0.03 * Math.max(0, w - 7)),
+      tonguePull: s.tonguePull, tongueHp: s.tongueHp,
+      rockCd: s.rockCd, rockRange: s.rockRange, rockDmg: s.rockDmg, rockAoe: s.rockAoe
     };
   }
   startNextWave() {
@@ -1303,6 +1793,14 @@ class EnemyManager {
       this.between = true;
       this.waveDelay = 2.5;                 // 波次间隙
       game.rebuildMap();                    // 每波重建可变地形（种子 = 波次）
+      // Tank 事件波：第 8 波起每 8 波，清场后触发 Boss 战
+      if (this.wave >= 8 && this.wave % 8 === 0) {
+        this.tankEventPending = true;
+      }
+    }
+    if (this.between && this.tankEventPending && this.waveDelay < 1.6) {
+      this.tankEventPending = false;
+      this.spawnTankEvent();
     }
     if (this.between) {
       this.waveDelay -= dt;
@@ -1315,6 +1813,7 @@ class EnemyManager {
       if (e.update(dt, game)) { done.push(e); this.active.splice(i, 1); }
     }
     for (var j = 0; j < done.length; j++) this.deactivate(done[j]);
+    this.updateTongues(dt);
   }
   spawnOne(type) {
     var e = this.pool.find(x => x.state === 'dead');
@@ -1386,6 +1885,16 @@ class EnemyManager {
       e.group.visible = false;
       e.state = 'dead';
     }
+    // 坦克与舌头清理
+    if (this.tank.state !== 'dead') {
+      var tk = bt.indexOf(this.tank.body);
+      if (tk >= 0) bt.splice(tk, 2);
+    }
+    this.tank.group.visible = false;
+    this.tank.state = 'dead';
+    this.tankActive = null;
+    this.tankEventPending = false;
+    for (var j = this.tongues.length - 1; j >= 0; j--) this.removeTongue(this.tongues[j], j);
     this.active.length = 0;
     this.wave = 0;
     this.spawnList = [];
@@ -2001,6 +2510,12 @@ class Player {
     this.healAcc = 0;          // 回血累计（触发 +6 浮动提示）
     this.healFx = 0;           // 回血浮动提示显示计时
     this.god = false;          // 调试：无敌模式
+    this.stunType = null;      // 受控状态：'runner' 扑击压制 / 'shooter' 舌头束缚 / 'brute' 冲锋硬直
+    this.stunT = 0;            // 受控剩余时间
+    this.stunFrom = null;      // 受控来源敌人（射击其本体可挣脱）
+    this.stunBreakAcc = 0;     // 空格挣脱累计次数
+    this.stunProtectT = 0;     // 挣脱后保护（防连控）
+    this.slowT = 0;            // 胆汁减速剩余时间
     this._wasOnGround = true;
   }
   reset() {
@@ -2020,13 +2535,43 @@ class Player {
     this.dmgDirT = 0;
     this.bobT = 0; this.breathT = 0;
     this.landDip = 0; this.healAcc = 0; this.healFx = 0;
+    this.stunType = null; this.stunT = 0; this.stunFrom = null;
+    this.stunBreakAcc = 0; this.stunProtectT = 0; this.slowT = 0;
     this._wasOnGround = true;
+  }
+  /* 进入受控状态（被压制/束缚/硬直），已有受控或保护期内忽略 */
+  tryStun(type, dur, from) {
+    if (this.stunT > 0 || this.stunProtectT > 0 || this.god) return;
+    this.stunType = type;
+    this.stunT = dur;
+    this.stunFrom = from || null;
+    this.stunBreakAcc = 0;
+  }
+  /* 解除受控（射击挣脱 / 空格挣脱 / 舌头打断），带防连控保护 */
+  releaseStun() {
+    if (this.stunT <= 0) return;
+    this.stunT = 0;
+    this.stunType = null;
+    this.stunFrom = null;
+    this.stunBreakAcc = 0;
+    this.stunProtectT = 0.5;
+  }
+  /* 射击来源敌人本体时调用（takeDamage 挂钩） */
+  stunBreakByEnemy(en) {
+    if (this.stunT > 0 && this.stunFrom === en) this.releaseStun();
   }
   update(dt, game) {
     // 计时器
     if (this.invulnT > 0) this.invulnT -= dt;
     if (this.dmgDirT > 0) this.dmgDirT -= dt;
     if (this.healFx > 0) this.healFx -= dt;
+    if (this.stunT > 0) this.stunT -= dt;
+    if (this.stunProtectT > 0) this.stunProtectT -= dt;
+    if (this.slowT > 0) this.slowT -= dt;
+    if (this.stunT <= 0 && this.stunType !== null) {   // 受控时间自然结束
+      this.stunType = null; this.stunFrom = null; this.stunBreakAcc = 0;
+      this.stunProtectT = 0.5;
+    }
     if (this.landDip > 0) this.landDip *= Math.exp(-10 * dt);
 
     // 脱战回血（6 秒未受伤后缓慢回复，带 +6 浮动提示）
@@ -2055,6 +2600,7 @@ class Player {
     }
     var f = (inp.has('KeyW') ? 1 : 0) - (inp.has('KeyS') ? 1 : 0);
     var r = (inp.has('KeyD') ? 1 : 0) - (inp.has('KeyA') ? 1 : 0);
+    if (this.stunT > 0) { f = 0; r = 0; }   // 受控期间移动禁用
 
     // ---- 蹲伏（C 键切换，桥洞压板下禁止站起） ----
     if (inp.justPressed.has('KeyC')) {
@@ -2075,10 +2621,11 @@ class Player {
       if (this.stamina <= PlayerConfig.LOW_STAMINA) this.sprinting = false;
     }
 
-    // ---- 速度选择（冲刺 > 行走 > 蹲伏；瞄准减速） ----
+    // ---- 速度选择（冲刺 > 行走 > 蹲伏；瞄准减速；胆汁减速） ----
     var speed = this.sprinting ? PlayerConfig.SPRINT
       : (this.crouching ? PlayerConfig.CROUCH : PlayerConfig.WALK);
     if (game.weapon.aimFrac > 0.5) speed *= PlayerConfig.AIM_MOVE_MULT;
+    if (this.slowT > 0) speed *= 0.8;
     var sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     // 摄像机朝向：yaw=0 时看向 -Z
     var wx = -sin * f + cos * r;
@@ -2092,8 +2639,14 @@ class Player {
     this.vel.x += (wx - this.vel.x) * accel;
     this.vel.z += (wz - this.vel.z) * accel;
 
+    // 受控时连按空格挣脱（3 次，每次 10 耐力）
+    if (this.stunT > 0 && inp.justPressed.has('Space')) {
+      this.stunBreakAcc++;
+      this.spendStamina(10, true);
+      if (this.stunBreakAcc >= 3) this.releaseStun();
+    }
     // 跳跃（可变高度：松开空格削减上升速度；蹲伏起跳自动站起）+ 重力
-    if (inp.justPressed.has('Space') && this.onGround) {
+    if (this.stunT <= 0 && inp.justPressed.has('Space') && this.onGround) {
       this.vel.y = PlayerConfig.JUMP_VEL;
       this.onGround = false;
       if (this.crouching) this.crouching = false;
@@ -2287,6 +2840,20 @@ class Game {
     this.sensVal = document.getElementById('sensVal');
     this.sensMinus = document.getElementById('sensMinus');
     this.sensPlus = document.getElementById('sensPlus');
+    this.stunBar = document.getElementById('stunBar');
+    this.stunProg = document.getElementById('stunProg');
+    this.boogerOverlay = document.getElementById('boogerOverlay');
+    this.bossBarWrap = document.getElementById('bossBarWrap');
+    this.bossBar = document.getElementById('bossBar');
+
+    // L4D2 融合状态：胆汁糊屏 / 坦克投石预警圈
+    this.boogerFx = 0;
+    this.rockWarnT = 0;
+    this.rockWarnMesh = new THREE.Mesh(new THREE.RingGeometry(1.6, 2, 32),
+      new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+    this.rockWarnMesh.rotation.x = -Math.PI / 2;
+    this.rockWarnMesh.visible = false;
+    this.scene.add(this.rockWarnMesh);
 
     // 鼠标灵敏度（localStorage 持久化，隐私模式降级为默认值；旧值吸附到 0.2 档位网格）
     this.sens = PlayerConfig.SENS_DEFAULT;
@@ -2355,6 +2922,37 @@ class Game {
         for (var i = 0; i < act.length; i++) bt.push(act[i].body, act[i].head);
         self.bulletTargets = bt;
         self.showToast('地形已重抽');
+      },
+      spawnSpecial: function (type, dist) {
+        // 直接生成特殊敌人：tank / runner / brute / shooter / grunt
+        type = type || 'runner';
+        dist = dist || 10;
+        var m = self.enemies;
+        var e = null;
+        if (type === 'tank') {
+          var pos = new THREE.Vector3(self.player.pos.x + dist, 0, self.player.pos.z);
+          e = m.tank;
+          e.activate(pos, 'tank', m.scaleCfg('tank'));
+          m.active.push(e);
+          self.bulletTargets.push(e.body, e.head);
+          self.tankActive = e;
+          self.showBanner('⚠ 坦克来袭！');
+          return e;
+        }
+        e = m.pool.find(function (x) { return x.state === 'dead'; });
+        if (!e) return null;
+        e.activate(new THREE.Vector3(self.player.pos.x + dist, 0, self.player.pos.z), type, m.scaleCfg(type));
+        m.active.push(e);
+        self.bulletTargets.push(e.body, e.head);
+        self.showToast('已生成：' + ((ENEMY_TYPES[type] || {}).label || type));
+        return e;
+      },
+      stunMe: function (type) {
+        // 模拟被控（调试/测试）：type = runner / shooter / brute
+        type = type || 'runner';
+        var dur = type === 'runner' ? 1.2 : (type === 'brute' ? 0.6 : 1.5);
+        self.player.tryStun(type, dur, null);
+        self.showToast('已模拟受控：' + type);
       }
     };
   }
@@ -2454,6 +3052,9 @@ class Game {
     this.shake = 0;
     this.damageFx = 0;
     this.hitFlashFx = 0;
+    this.boogerFx = 0;
+    this.rockWarnT = 0;
+    this.rockWarnMesh.visible = false;
     this.state = 'playing';
     this.startScreen.classList.add('hidden');
     this.gameoverScreen.classList.add('hidden');
@@ -2550,6 +3151,11 @@ class Game {
         var cam = this.camera;
         cam.rotation.y = this.player.yaw + this.weapon.kickYaw;
         cam.rotation.x = this.player.pitch + this.weapon.kickPitch;
+        // 被扑击压制时镜头下压（看向扑击者）
+        if (this.player.stunT > 0 && this.player.stunType === 'runner') {
+          cam.rotation.x += (-1.05 - cam.rotation.x) * (1 - Math.exp(-6 * dt));
+          cam.rotation.y = this.player.yaw + Math.sin(this.time * 3) * 0.05;   // 挣扎晃动
+        }
         if (this.shake > 0) {
           this.shake *= Math.exp(-6 * dt);
           cam.position.copy(this.player.pos);
@@ -2581,6 +3187,17 @@ class Game {
 
         this.damageFx *= Math.exp(-3.5 * dt);
         this.hitFlashFx *= Math.exp(-8 * dt);   // 受击白色闪光衰减
+        // 胆汁糊屏衰减（4s 生效期）
+        if (this.boogerFx > 0) this.boogerFx -= dt / 4;
+        if (this.boogerFx < 0) this.boogerFx = 0;
+        // 坦克投石预警圈（跟随玩家脚下，倒计时）
+        if (this.rockWarnT > 0) {
+          this.rockWarnT -= dt;
+          this.rockWarnMesh.visible = true;
+          this.rockWarnMesh.position.set(this.player.pos.x, 0.06, this.player.pos.z);
+        } else {
+          this.rockWarnMesh.visible = false;
+        }
         this.updateHud();
         this.input.clearPressed();
       } else if (this.state === 'dying') {
@@ -2645,6 +3262,18 @@ class Game {
       this.dmgDir.style.transform = 'rotate(' + (p.dmgDirAngle * 180 / Math.PI).toFixed(1) + 'deg)';
       this.dmgDir.classList.add('show');
     } else this.dmgDir.classList.remove('show');
+    // 被控挣脱提示条（连按空格 / 射击来源挣脱）
+    if (p.stunT > 0 && p.stunType !== 'brute') {
+      this.stunBar.classList.add('show');
+      this.stunProg.style.width = Math.min(100, p.stunBreakAcc / 3 * 100).toFixed(0) + '%';
+    } else this.stunBar.classList.remove('show');
+    // 胆汁糊屏
+    this.boogerOverlay.style.opacity = Math.min(1, this.boogerFx * 0.85).toFixed(3);
+    // Tank Boss 血条
+    if (this.tankActive && this.tankActive.state === 'active') {
+      this.bossBarWrap.classList.add('show');
+      this.bossBar.style.width = Math.max(0, this.tankActive.hp / this.tankActive.maxHp * 100).toFixed(1) + '%';
+    } else this.bossBarWrap.classList.remove('show');
     // 准星扩散
     var px = 6 + w.spread * 1150 + (w.reloading ? 8 : 0);
     document.documentElement.style.setProperty('--spread', px.toFixed(1) + 'px');
