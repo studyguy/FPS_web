@@ -3799,12 +3799,26 @@ class Game {
     });
     // 灵敏度调节（暂停界面）
     self.sensMinus.addEventListener('click', function () { self.changeSens(-1); });
-    // 滚轮切换武器
+    // 滚轮切换武器：同一次物理滚动的多个 wheel 事件合并为一次切换（逐格切换）
+    self._wheelAcc = 0;
+    self._wheelSwitchAt = 0;
     window.addEventListener('wheel', function (e) {
       if (self.state !== 'playing' || document.pointerLockElement !== self.canvas) return;
-      self.weapons.cycle(e.deltaY > 0 ? 1 : -1);
+      self.handleWheel(e.deltaY);
     }, { passive: true });
     self.sensPlus.addEventListener('click', function () { self.changeSens(1); });
+  }
+
+  /* 滚轮逐格切换：累积 delta 超过阈值才切一把；切换后 100ms 内忽略（合并同批事件） */
+  handleWheel(deltaY) {
+    var now = performance.now();
+    if (now - this._wheelSwitchAt < 100) return;
+    this._wheelAcc += deltaY;
+    if (Math.abs(this._wheelAcc) < 30) return;
+    var dir = this._wheelAcc > 0 ? 1 : -1;
+    this._wheelAcc = 0;
+    this._wheelSwitchAt = now;
+    this.weapons.cycle(dir);
   }
 
   /* 灵敏度增减（±0.2，持久化到 localStorage） */
