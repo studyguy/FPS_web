@@ -1254,19 +1254,24 @@ var ENEMY_TYPES = {
   shooter: { scale: 1.0, body: 0x5a2a8f, head: 0x46206e, eye: 0x00ccff, label: '射手' },
   tank:    { scale: 2.2, body: 0x5c1f1f, head: 0x3f1313, eye: 0xff4400, label: '坦克' }
 };
-/* v2.0 外观差异化：装饰部件共享材质（按类型派生，受击闪红只作用于主材质） */
-var DECO_MATS = (function () {
-  var m = {};
-  var types = ['grunt', 'runner', 'shooter', 'brute', 'tank'];
-  for (var i = 0; i < types.length; i++) {
-    var t = ENEMY_TYPES[types[i]];
-    m[types[i]] = {
-      main: new THREE.MeshStandardMaterial({ color: t.body, roughness: 0.75, metalness: 0.1 }),
-      dark: new THREE.MeshStandardMaterial({ color: t.head, roughness: 0.7, metalness: 0.1 })
-    };
+/* v2.0 外观差异化：装饰部件共享材质（按类型派生，受击闪红只作用于主材质）
+   惰性创建：THREE 由加载器异步就绪，主脚本顶层不得立即使用 THREE */
+var DECO_MATS = null;
+function decoMats() {
+  if (!DECO_MATS) {
+    var m = {};
+    var types = ['grunt', 'runner', 'shooter', 'brute', 'tank'];
+    for (var i = 0; i < types.length; i++) {
+      var t = ENEMY_TYPES[types[i]];
+      m[types[i]] = {
+        main: new THREE.MeshStandardMaterial({ color: t.body, roughness: 0.75, metalness: 0.1 }),
+        dark: new THREE.MeshStandardMaterial({ color: t.head, roughness: 0.7, metalness: 0.1 })
+      };
+    }
+    DECO_MATS = m;
   }
-  return m;
-})();
+  return DECO_MATS;
+}
 /* 体型变体（body/head/limb 部件缩放；命中盒随外观一致变化） */
 var BODY_VARIANTS = {
   grunt:   { body: [1, 1, 1], head: [1, 1, 1], limb: [1, 1, 1] },
@@ -1275,8 +1280,12 @@ var BODY_VARIANTS = {
   brute:   { body: [1.32, 0.92, 1.22], head: [1.15, 0.95, 1.15], limb: [1.18, 1, 1.18] },
   tank:    { body: [1.35, 1.25, 1.3], head: [1.25, 1.2, 1.25], limb: [1.28, 1, 1.28] }
 };
-/* 装饰用单位几何（mesh.scale 变形，避免重复建几何） */
-var DECO_UNIT = { box: new THREE.BoxGeometry(1, 1, 1), cone: new THREE.ConeGeometry(0.5, 1, 8) };
+/* 装饰用单位几何（mesh.scale 变形，避免重复建几何；惰性创建） */
+var DECO_UNIT = null;
+function decoUnit() {
+  if (!DECO_UNIT) DECO_UNIT = { box: new THREE.BoxGeometry(1, 1, 1), cone: new THREE.ConeGeometry(0.5, 1, 8) };
+  return DECO_UNIT;
+}
 
 class Enemy {
   constructor() {
@@ -1336,7 +1345,7 @@ class Enemy {
       self.deco[type] = g;
     }
     function decoBox(g, mat, s, pos, rot) {
-      var m = new THREE.Mesh(DECO_UNIT.box, mat);
+      var m = new THREE.Mesh(decoUnit().box, mat);
       m.scale.set(s[0], s[1], s[2]);
       m.position.set(pos[0], pos[1], pos[2]);
       if (rot) { m.rotation.x = rot[0]; m.rotation.y = rot[1]; m.rotation.z = rot[2]; }
@@ -1344,7 +1353,7 @@ class Enemy {
       return m;
     }
     function decoCone(g, mat, s, pos, rot) {
-      var m = new THREE.Mesh(DECO_UNIT.cone, mat);
+      var m = new THREE.Mesh(decoUnit().cone, mat);
       m.scale.set(s[0], s[1], s[2]);
       m.position.set(pos[0], pos[1], pos[2]);
       if (rot) { m.rotation.z = rot[2]; m.rotation.x = rot[0]; }
@@ -1353,32 +1362,32 @@ class Enemy {
     }
     // 突击兵：破布头巾（头顶斜片 + 后飘布条）
     decoGroup('grunt', function (g) {
-      var md = DECO_MATS.grunt.dark;
+      var md = decoMats().grunt.dark;
       decoBox(g, md, [0.42, 0.08, 0.4], [0, 1.84, 0], [0, 0, 0.12]);
       decoBox(g, md, [0.09, 0.02, 0.32], [0, 1.88, 0.18], [0.42, 0, 0]);
     });
     // 疾行者：背鳍（速度感，冲刺时方向感）
     decoGroup('runner', function (g) {
-      var m = DECO_MATS.runner.main;
+      var m = decoMats().runner.main;
       decoBox(g, m, [0.06, 0.95, 0.5], [0, 1.55, -0.34], [-0.25, 0, 0]);
       decoBox(g, m, [0.05, 0.5, 0.3], [0, 1.02, -0.32], [-0.42, 0, 0]);
     });
     // 射手：大头 + 前伸长嘴（吐舌来源）+ 背后披风
     decoGroup('shooter', function (g) {
-      var m = DECO_MATS.shooter.main, md = DECO_MATS.shooter.dark;
+      var m = decoMats().shooter.main, md = decoMats().shooter.dark;
       decoBox(g, md, [0.26, 0.17, 0.52], [0, 1.53, 0.27]);
       decoBox(g, m, [0.92, 1.35, 0.09], [0, 0.85, -0.32], [0.12, 0, 0]);
     });
     // 重装兵：头盔帽檐 + 双肩甲（冲锋时的厚重感）
     decoGroup('brute', function (g) {
-      var m = DECO_MATS.brute.main, md = DECO_MATS.brute.dark;
+      var m = decoMats().brute.main, md = decoMats().brute.dark;
       decoBox(g, md, [0.55, 0.16, 0.52], [0, 1.86, 0], [0.16, 0, 0]);
       decoBox(g, m, [0.34, 0.26, 0.42], [-0.52, 1.55, 0], [0, 0, 0.32]);
       decoBox(g, m, [0.34, 0.26, 0.42], [0.52, 1.55, 0], [0, 0, -0.32]);
     });
     // 坦克：双角 + 胸甲 + 肩刺（Boss 压迫感）
     decoGroup('tank', function (g) {
-      var m = DECO_MATS.tank.main, md = DECO_MATS.tank.dark;
+      var m = decoMats().tank.main, md = decoMats().tank.dark;
       decoCone(g, md, [0.3, 0.6, 0.3], [-0.24, 2.12, 0.02], [0, 0, -0.4]);
       decoCone(g, md, [0.3, 0.6, 0.3], [0.24, 2.12, 0.02], [0, 0, 0.4]);
       decoBox(g, m, [0.88, 0.72, 0.12], [0, 1.18, 0.27]);
