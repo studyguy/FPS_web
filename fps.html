@@ -84,6 +84,39 @@
     border-radius: 8px; overflow: hidden; }
   #bossBar { height: 100%; width: 100%; background: linear-gradient(90deg,#b32020,#ff5a3d);
     border-radius: 8px; transition: width .1s linear; }
+
+  /* 武器栏（底部） */
+  #weaponBar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 42; pointer-events: none; }
+  #weaponBar .wslot { min-width: 96px; background: rgba(8,12,20,.6); border: 1px solid rgba(120,220,255,.22);
+    border-radius: 8px; padding: 6px 10px; text-align: center; color: #9fc3e8; font-size: 12px;
+    transition: transform .12s, border-color .12s; }
+  #weaponBar .wslot .wkey { display: block; font-size: 10px; color: rgba(159,195,232,.6); }
+  #weaponBar .wslot .wname { display: block; font-weight: 700; font-size: 13px; }
+  #weaponBar .wslot .wammo { display: block; font-size: 11px; color: #7fd4ff; font-variant-numeric: tabular-nums; }
+  #weaponBar .wslot .wup { display: block; font-size: 10px; color: #ffd94a; letter-spacing: 2px; min-height: 12px; }
+  #weaponBar .wslot.locked { opacity: .4; }
+  #weaponBar .wslot.cur { border-color: #ffd94a; transform: translateY(-4px) scale(1.06);
+    background: rgba(30,40,24,.75); box-shadow: 0 4px 14px rgba(255,200,80,.25); }
+  #weaponBar .wslot.cur .wname { color: #ffd94a; }
+
+  /* 道具槽（右下角，马里奥赛车式） */
+  #itemSlot { position: fixed; right: 18px; bottom: 18px; z-index: 42; pointer-events: none;
+    background: rgba(8,12,20,.65); border: 1px solid rgba(120,220,255,.25); border-radius: 10px;
+    padding: 8px 14px; text-align: center; min-width: 126px; }
+  #itemSlot .is-title { font-size: 10px; color: rgba(159,195,232,.6); letter-spacing: 2px; }
+  #itemSlot .is-name { font-size: 14px; font-weight: 700; color: #ffd94a; margin-top: 2px; }
+  #itemSlot .is-hint { font-size: 10px; color: rgba(159,195,232,.55); margin-top: 2px; }
+  #itemSlot.empty .is-name { color: rgba(159,195,232,.4); }
+
+  /* 狙击镜 */
+  #scopeOverlay { position: fixed; inset: 0; z-index: 48; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at center, transparent 0 30vmin, rgba(0,0,0,.97) 44vmin 100%); }
+  #scopeOverlay.show { opacity: 1; }
+  #scopeOverlay .scope-line { position: absolute; left: 50%; top: 50%; background: rgba(0,0,0,.92); }
+  #scopeOverlay .sl1 { width: 2px; height: 100%; transform: translateX(-50%); }
+  #scopeOverlay .sl2 { height: 2px; width: 100%; transform: translateY(-50%); }
+  body.scoped #crosshair { display: none; }
   #ammoText { min-width: 74px; text-align: right; }
   #ammoText.reloading { color: #ffb84d; }
 
@@ -212,6 +245,14 @@
 <div id="boogerOverlay"></div>
 <div id="stunBar">连按 空格 挣脱！<span class="sb-prog"><i id="stunProg"></i></span></div>
 <div id="bossBarWrap"><div class="boss-lbl">⚠ 坦克</div><div class="boss-bg"><div id="bossBar"></div></div></div>
+<div id="scopeOverlay"><div class="scope-line sl1"></div><div class="scope-line sl2"></div></div>
+<div id="weaponBar">
+  <div class="wslot" id="wslot0"><span class="wkey">1</span><span class="wname">手枪</span><span class="wammo"></span><span class="wup"></span></div>
+  <div class="wslot" id="wslot1"><span class="wkey">2</span><span class="wname">步枪</span><span class="wammo"></span><span class="wup"></span></div>
+  <div class="wslot" id="wslot2"><span class="wkey">3</span><span class="wname">霰弹枪</span><span class="wammo"></span><span class="wup"></span></div>
+  <div class="wslot" id="wslot3"><span class="wkey">4</span><span class="wname">狙击枪</span><span class="wammo"></span><span class="wup"></span></div>
+</div>
+<div id="itemSlot" class="empty"><div class="is-title">道具</div><div class="is-name">—</div><div class="is-hint">按 F 使用</div></div>
 
 <!-- 开始界面 -->
 <div id="startScreen" class="screen">
@@ -233,6 +274,7 @@
   <p class="tip">点击后鼠标将被锁定用于控制视角，按 Esc 可暂停</p>
   <p class="tip" style="color:rgba(150,200,230,.75)">地形随波次变化：低台/跳台可上（近战能打到你）· 矮墙可翻不可站 · 第 7 波中央升起能量高台（小心射手）· 桥洞蹲伏可钻</p>
   <p class="tip" style="color:rgba(255,180,150,.8)">敌人技能（L4D2 式）：疾行者会飞扑压制（蹲伏可躲，被压连按空格挣脱）· 射手会舌头拉拽（蹲伏/掩体可躲，射断舌头挣脱）· 重装兵会冲锋（引它撞墙会自晕）· 第 8 波起有坦克 Boss（投石可打高台）</p>
+  <p class="tip" style="color:rgba(150,230,180,.85)">武器与道具：除手枪外武器需拾取发光武器箱解锁（W 标记）· 道具箱（? 标记）随机掉落功能道具（F 使用）与武器强化</p>
 </div>
 
 <!-- 暂停界面 -->
@@ -582,16 +624,30 @@ class BulletPool {
     this.ray = new THREE.Raycaster();
     this.speed = 130;
   }
-  fire(pos, dir) {
+  fire(pos, dir, dmg, knock) {
     var b = this.pool.find(x => !x.active) || this.pool[0];
     b.active = true;
     b.pos.copy(pos);
     b.dir.copy(dir);
     b.life = 1.5;
+    b.damage = dmg || 34;
+    b.knock = knock || 0;
     b.mesh.visible = true;
     b.mesh.position.copy(pos);
     b.mesh.quaternion.setFromUnitVectors(Z_AXIS, dir);
     this.active.push(b);
+  }
+  /* 霰弹枪：一次发射多颗弹丸（锥形扩散，每颗独立伤害/击退） */
+  fireSpread(pos, dir, count, spread, dmg, knock) {
+    var right = new THREE.Vector3().crossVectors(dir, UP).normalize();
+    var up = new THREE.Vector3().crossVectors(right, dir).normalize();
+    for (var i = 0; i < count; i++) {
+      var d = dir.clone();
+      var a = Math.random() * Math.PI * 2;
+      var r = Math.sqrt(Math.random()) * spread;
+      d.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
+      this.fire(pos, d, dmg, knock);
+    }
   }
   update(dt, game) {
     var seg = this.speed * dt * 0.5;   // 分两个子步，防止高速穿墙
@@ -620,7 +676,7 @@ class BulletPool {
     var o = hit.object;
     if (o.userData.tongue) {   // 射手舌头：射断挣脱
       var t = o.userData.tongue;
-      t.hp -= 34 * (o.userData.head ? 2 : 1);
+      t.hp -= b.damage * (o.userData.head ? 2 : 1);
       game.showHitmarker();
       game.audio.playHit();
       game.particles.burst(hit.point, 'spark', 4, 2.5, 0.3);
@@ -629,8 +685,11 @@ class BulletPool {
     }
     if (o.userData.enemy) {   // 命中敌人（爆头 2 倍伤害）
       var enemy = o.userData.enemy;
-      var dmg = 34 * (o.userData.head ? 2 : 1);
+      var dmg = b.damage * (o.userData.head ? 2 : 1);
       enemy.takeDamage(dmg, o.userData.head, game, b.dir);
+      if (b.knock > 0 && enemy.state === 'active') {
+        enemy.group.position.addScaledVector(b.dir, b.knock);   // 霰弹击退
+      }
       game.player.stunBreakByEnemy(enemy);   // 射击受控来源本体 → 挣脱
       game.showHitmarker();
       game.audio.playHit();
@@ -702,32 +761,52 @@ class ParticlePool {
 }
 
 /* ======================= 武器（步枪 + 第一人称模型） ======================= */
+/* ======================= 武器配置表（集中所有可调数值） ======================= */
+/* unlocked: 手枪开局自带；其余武器箱解锁（unlockWave 起可刷） */
+var WEAPONS = {
+  pistol: {
+    id: 'pistol', name: '手枪', key: 1, unlocked: true, unlockWave: 0,
+    damage: 25, fireRate: 5, magSize: 12, reserve: 0, reserveInf: true,
+    reloadTime: 1.2, switchTime: 0.25, baseSpread: 0.004, moveSpread: 0.007,
+    kickP: 0.006, kickY: 0.005, kickMax: 0.05, aimFov: 75, moveMul: 1.0,
+    pellets: 1, knock: 0, color: 0x2e333c, dark: 0x1a1e26, accent: 0x8a8f98
+  },
+  rifle: {
+    id: 'rifle', name: '步枪', key: 2, unlocked: false, unlockWave: 1,
+    damage: 34, fireRate: 9, magSize: 30, reserve: 150, reserveInf: false,
+    reloadTime: 1.6, switchTime: 0.4, baseSpread: 0.006, moveSpread: 0.014,
+    kickP: 0.011, kickY: 0.005, kickMax: 0.1, aimFov: 55, moveMul: 1.0,
+    pellets: 1, knock: 0, color: 0x2e333c, dark: 0x191d24, accent: 0xc9562b
+  },
+  shotgun: {
+    id: 'shotgun', name: '霰弹枪', key: 3, unlocked: false, unlockWave: 3,
+    damage: 12, fireRate: 1.2, magSize: 6, reserve: 36, reserveInf: false,
+    reloadTime: 2.4, switchTime: 0.45, baseSpread: 0.05, moveSpread: 0.03,
+    kickP: 0.03, kickY: 0.012, kickMax: 0.16, aimFov: 75, moveMul: 0.9,
+    pellets: 8, knock: 1.2, color: 0x3a2c1e, dark: 0x241a10, accent: 0x8a5a2e
+  },
+  sniper: {
+    id: 'sniper', name: '狙击枪', key: 4, unlocked: false, unlockWave: 5,
+    damage: 110, fireRate: 0.9, magSize: 5, reserve: 20, reserveInf: false,
+    reloadTime: 2.0, switchTime: 0.5, baseSpread: 0.0005, moveSpread: 0.02,
+    kickP: 0.05, kickY: 0.008, kickMax: 0.22, aimFov: 28, moveMul: 0.85,
+    pellets: 1, knock: 0, color: 0x24351f, dark: 0x141f12, accent: 0x5a8a4a
+  }
+};
+
 class Weapon {
-  constructor(game) {
+  constructor(game, cfg) {
     this.game = game;
+    this.cfg = cfg;
+    this.id = cfg.id;
+    this.name = cfg.name;
+    this.unlocked = !!cfg.unlocked;
+    this.unlockWave = cfg.unlockWave || 0;
     this.group = new THREE.Group();
     this.group.position.set(0.30, -0.28, -0.55);
+    this.buildModel(cfg);
 
-    var metal = new THREE.MeshStandardMaterial({ color: 0x2e333c, roughness: 0.35, metalness: 0.8 });
-    var dark = new THREE.MeshStandardMaterial({ color: 0x191d24, roughness: 0.6, metalness: 0.4 });
-    var accent = new THREE.MeshStandardMaterial({ color: 0xc9562b, roughness: 0.5, metalness: 0.3 });
-    function mk(geo, mat, x, y, z) {
-      var m = new THREE.Mesh(geo, mat);
-      m.position.set(x, y, z);
-      return m;
-    }
-    // 枪身 / 枪管 / 枪口 / 枪托 / 握把 / 弹匣 / 导轨 / 准星（简易步枪造型）
-    this.group.add(mk(new THREE.BoxGeometry(0.07, 0.11, 0.42), dark, 0, 0, 0));
-    this.group.add(mk(new THREE.BoxGeometry(0.05, 0.05, 0.5), metal, 0, 0.045, -0.42));
-    this.group.add(mk(new THREE.BoxGeometry(0.06, 0.06, 0.06), metal, 0, 0.045, -0.7));
-    this.group.add(mk(new THREE.BoxGeometry(0.055, 0.09, 0.28), dark, 0, -0.01, 0.32));
-    var grip = mk(new THREE.BoxGeometry(0.05, 0.12, 0.08), accent, 0, -0.10, 0.12); grip.rotation.x = 0.4;
-    var mag = mk(new THREE.BoxGeometry(0.06, 0.16, 0.1), accent, 0, -0.12, -0.06); mag.rotation.x = -0.2;
-    this.group.add(mk(new THREE.BoxGeometry(0.04, 0.02, 0.3), dark, 0, 0.065, -0.1));
-    this.group.add(mk(new THREE.BoxGeometry(0.02, 0.06, 0.02), accent, 0, 0.08, -0.55));
-    this.group.add(mk(new THREE.BoxGeometry(0.02, 0.06, 0.02), accent, 0, 0.08, 0.05));
-
-    // 枪口火焰（贴片 + 点光源）
+    // 枪口火焰（贴片 + 点光源，每把枪独立）
     this.flashTex = makeTex(128, function (g, s) {
       var grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
       grad.addColorStop(0, 'rgba(255,255,220,1)');
@@ -737,40 +816,119 @@ class Weapon {
     });
     this.flash = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.55),
       new THREE.MeshBasicMaterial({ map: this.flashTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-    this.flash.position.set(0, 0.05, -0.74);
+    this.flash.position.set(0, this.flashPosY, this.muzzleZ - 0.04);
     this.flash.rotation.y = Math.PI;
     this.flash.visible = false;
     this.group.add(this.flash);
     this.muzzleLight = new THREE.PointLight(0xffbb55, 0, 7, 2);
-    this.muzzleLight.position.set(0, 0.05, -0.74);
+    this.muzzleLight.position.set(0, this.flashPosY, this.muzzleZ - 0.04);
     this.group.add(this.muzzleLight);
-    this.muzzle = new THREE.Object3D();           // 子弹出生点（世界坐标）
-    this.muzzle.position.set(0, 0.05, -0.74);
+    this.muzzle = new THREE.Object3D();
+    this.muzzle.position.set(0, this.flashPosY, this.muzzleZ);
     this.group.add(this.muzzle);
 
-    game.camera.add(this.group);                  // 模型挂在相机上
+    game.camera.add(this.group);
+    this.group.visible = this.unlocked;
 
     // 武器状态
-    this.magSize = 30;
-    this.ammo = 30;
-    this.reserve = 150;
-    this.fireRate = 9;                            // 射速：9 发/秒
+    this.magSize = cfg.magSize;
+    this.ammo = cfg.magSize;
+    this.reserve = cfg.reserve;
+    this.fireRate = cfg.fireRate;
     this.fireCd = 0;
     this.reloading = false;
-    this.reloadTime = 1.6;
+    this.reloadTime = cfg.reloadTime;
     this.reloadT = 0;
-    this.baseSpread = 0.006;
-    this.spread = 0.006;
-    this.fireHeat = 0;                            // 连发热量（准星扩散）
-    this.kickPitch = 0;                           // 视角后坐力（上抬后恢复）
+    this.baseSpread = cfg.baseSpread;
+    this.spread = cfg.baseSpread;
+    this.fireHeat = 0;
+    this.kickPitch = 0;
     this.kickYaw = 0;
-    this.kick = 0;                                // 枪模后坐
+    this.kick = 0;
     this.flashT = 0;
-    this.aimFrac = 0;                             // 瞄准程度 0~1
+    this.aimFrac = 0;
     this.bobT = 0;
+    // 强化（道具拾取，本局永久，每项 3 级）
+    this.dmgMul = 1; this.rateMul = 1; this.magMul = 1; this.spreadMul = 1;
+    this.dmgLv = 0; this.rateLv = 0; this.magLv = 0; this.spreadLv = 0;
+  }
+  /* 第一人称模型（方块拼装，按武器类型区分造型） */
+  buildModel(cfg) {
+    var metal = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.35, metalness: 0.8 });
+    var dark = new THREE.MeshStandardMaterial({ color: cfg.dark, roughness: 0.6, metalness: 0.4 });
+    var accent = new THREE.MeshStandardMaterial({ color: cfg.accent, roughness: 0.5, metalness: 0.3 });
+    function mk(geo, mat, x, y, z, rx) {
+      var m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      if (rx) m.rotation.x = rx;
+      return m;
+    }
+    var g = this.group;
+    if (this.id === 'pistol') {
+      g.add(mk(new THREE.BoxGeometry(0.055, 0.09, 0.24), dark, 0, 0, 0));
+      g.add(mk(new THREE.BoxGeometry(0.04, 0.04, 0.2), metal, 0, 0.03, -0.26));
+      g.add(mk(new THREE.BoxGeometry(0.05, 0.1, 0.07), accent, 0, -0.08, 0.05, 0.35));
+      this.muzzleZ = -0.38; this.flashPosY = 0.035;
+    } else if (this.id === 'rifle') {
+      g.add(mk(new THREE.BoxGeometry(0.07, 0.11, 0.42), dark, 0, 0, 0));
+      g.add(mk(new THREE.BoxGeometry(0.05, 0.05, 0.5), metal, 0, 0.045, -0.42));
+      g.add(mk(new THREE.BoxGeometry(0.06, 0.06, 0.06), metal, 0, 0.045, -0.7));
+      g.add(mk(new THREE.BoxGeometry(0.055, 0.09, 0.28), dark, 0, -0.01, 0.32));
+      var grip = mk(new THREE.BoxGeometry(0.05, 0.12, 0.08), accent, 0, -0.10, 0.12); grip.rotation.x = 0.4;
+      var mag = mk(new THREE.BoxGeometry(0.06, 0.16, 0.1), accent, 0, -0.12, -0.06); mag.rotation.x = -0.2;
+      g.add(grip); g.add(mag);
+      g.add(mk(new THREE.BoxGeometry(0.04, 0.02, 0.3), dark, 0, 0.065, -0.1));
+      g.add(mk(new THREE.BoxGeometry(0.02, 0.06, 0.02), accent, 0, 0.08, -0.55));
+      g.add(mk(new THREE.BoxGeometry(0.02, 0.06, 0.02), accent, 0, 0.08, 0.05));
+      this.muzzleZ = -0.74; this.flashPosY = 0.05;
+    } else if (this.id === 'shotgun') {
+      g.add(mk(new THREE.BoxGeometry(0.08, 0.13, 0.44), dark, 0, 0, 0));
+      g.add(mk(new THREE.BoxGeometry(0.06, 0.06, 0.6), metal, 0, 0.05, -0.5));
+      g.add(mk(new THREE.BoxGeometry(0.075, 0.075, 0.26), accent, 0, 0.05, -0.3));
+      g.add(mk(new THREE.BoxGeometry(0.06, 0.1, 0.3), dark, 0, -0.01, 0.34));
+      var g2 = mk(new THREE.BoxGeometry(0.06, 0.14, 0.1), accent, 0, -0.13, -0.04); g2.rotation.x = -0.2;
+      g.add(g2);
+      this.muzzleZ = -0.82; this.flashPosY = 0.06;
+    } else { // sniper
+      g.add(mk(new THREE.BoxGeometry(0.06, 0.1, 0.5), dark, 0, 0, 0));
+      g.add(mk(new THREE.BoxGeometry(0.045, 0.045, 0.7), metal, 0, 0.04, -0.55));
+      g.add(mk(new THREE.CylinderGeometry(0.035, 0.035, 0.32, 10), dark, 0, 0.09, -0.02));
+      g.add(mk(new THREE.BoxGeometry(0.05, 0.08, 0.24), dark, 0, -0.01, 0.36));
+      var g3 = mk(new THREE.BoxGeometry(0.05, 0.1, 0.1), accent, 0, -0.1, 0.08); g3.rotation.x = 0.3;
+      g.add(g3);
+      this.muzzleZ = -0.9; this.flashPosY = 0.045;
+    }
+  }
+  /* 强化后的有效数值 */
+  effectiveDamage() { return this.cfg.damage * this.dmgMul; }
+  effectiveRate() { return this.cfg.fireRate * this.rateMul; }
+  effectiveMag() { return Math.round(this.cfg.magSize * this.magMul); }
+  /* 增强道具：对当前武器永久强化（3 级上限，满级转弹药） */
+  upgrade(kind) {
+    var game = this.game;
+    var names = { dmg: '伤害强化', rate: '射速强化', mag: '扩容弹匣', spread: '精准强化' };
+    var ok = false;
+    if (kind === 'dmg' && this.dmgLv < 3) { this.dmgLv++; this.dmgMul = 1 + 0.2 * this.dmgLv; ok = true; }
+    else if (kind === 'rate' && this.rateLv < 3) { this.rateLv++; this.rateMul = 1 + 0.15 * this.rateLv; ok = true; }
+    else if (kind === 'mag' && this.magLv < 3) {
+      this.magLv++; this.magMul = 1 + 0.5 * this.magLv;
+      if (this.ammo === 0) this.ammo = this.effectiveMag();
+      ok = true;
+    }
+    else if (kind === 'spread' && this.spreadLv < 3) { this.spreadLv++; this.spreadMul = Math.pow(0.7, this.spreadLv); ok = true; }
+    if (ok) {
+      var lv = kind === 'dmg' ? this.dmgLv : kind === 'rate' ? this.rateLv : kind === 'mag' ? this.magLv : this.spreadLv;
+      game.showBanner(names[kind] + ' +' + lv + '（' + this.name + '）');
+    }
+    if (!ok) {
+      // 满级 → 转弹药
+      this.reserve = Math.min(999, this.reserve + this.effectiveMag() * 2);
+      game.showToast(this.name + ' 该强化已满级，转为弹药补给');
+    }
   }
   reset() {
-    this.ammo = this.magSize; this.reserve = 150;
+    this.ammo = this.magSize;
+    this.reserve = this.cfg.reserve;
     this.reloading = false; this.fireCd = 0;
     this.spread = this.baseSpread; this.fireHeat = 0;
     this.kickPitch = 0; this.kickYaw = 0; this.kick = 0;
@@ -778,14 +936,15 @@ class Weapon {
     this.aimFrac = 0;
   }
   reload() {
-    if (this.reloading || this.ammo === this.magSize || this.reserve <= 0) return;
+    if (this.reloading || this.ammo === this.effectiveMag()) return;
+    if (!this.cfg.reserveInf && this.reserve <= 0) return;
     this.reloading = true;
     this.reloadT = this.reloadTime;
     this.game.audio.playReload();
   }
   update(dt, game) {
-    // 不要求指针锁定也能射击（无法锁定时仍可瞄准屏幕中心开火）
-    var canShoot = game.state === 'playing';
+    // 不要求指针锁定也能射击（无法锁定时仍可瞄准屏幕中心开火）；切枪中禁射
+    var canShoot = game.state === 'playing' && !game.weapons.switching;
     this.firing = canShoot && game.input.mouseLeft;
     // 冲刺中开火 → 立即解除冲刺（不锁枪，防软锁）
     if (this.firing) game.player.cancelMoveAction();
@@ -794,8 +953,10 @@ class Weapon {
     if (this.reloading) {
       this.reloadT -= dt;
       if (this.reloadT <= 0) {
-        var take = Math.min(this.magSize - this.ammo, this.reserve);
-        this.ammo += take; this.reserve -= take;
+        var need = this.effectiveMag() - this.ammo;
+        var take = this.cfg.reserveInf ? need : Math.min(need, this.reserve);
+        this.ammo += take;
+        if (!this.cfg.reserveInf) this.reserve -= take;
         this.reloading = false;
         game.audio.playReloadEnd();
       }
@@ -807,12 +968,13 @@ class Weapon {
       else { game.audio.playEmpty(); this.fireCd = 0.3; }   // 空仓
     }
 
-    // 瞄准程度
+    // 瞄准程度（无开镜武器的 aimFov=75 不影响）
     this.aimFrac += ((game.input.mouseRight ? 1 : 0) - this.aimFrac) * (1 - Math.exp(-10 * dt));
 
     // 准星扩散：随移动速度与连发热量增大，瞄准时缩小；蹲伏更稳、空中更散
     var speedF = Math.min(1, game.player.hSpeed / 10);
-    var target = this.baseSpread + speedF * 0.014 + Math.min(this.fireHeat, 12) * 0.0006;
+    var target = this.baseSpread * this.spreadMul + speedF * this.cfg.moveSpread
+      + Math.min(this.fireHeat, 12) * 0.0006;
     if (game.player.crouching) target *= PlayerConfig.CROUCH_SPREAD_MULT;
     if (!game.player.onGround) target += PlayerConfig.AIR_SPREAD_PENALTY;
     target *= 1 - 0.62 * this.aimFrac;
@@ -848,11 +1010,11 @@ class Weapon {
   }
   fire(game) {
     this.ammo--;
-    this.fireCd = 1 / this.fireRate;
+    this.fireCd = 1 / this.effectiveRate();
     this.fireHeat++;
-    // 视角后坐：轻微上抬 + 随机左右，随后自动恢复
-    this.kickPitch = Math.min(0.1, this.kickPitch + 0.011 + Math.random() * 0.005);
-    this.kickYaw += (Math.random() - 0.5) * 0.010;
+    // 视角后坐（按武器参数）
+    this.kickPitch = Math.min(this.cfg.kickMax, this.kickPitch + this.cfg.kickP + Math.random() * this.cfg.kickY);
+    this.kickYaw += (Math.random() - 0.5) * this.cfg.kickY * 2;
     this.kick = 1;
     this.flashT = 0.05;
     this.flash.rotation.z = Math.random() * Math.PI * 2;
@@ -870,11 +1032,105 @@ class Weapon {
 
     var mp = new THREE.Vector3();
     this.muzzle.getWorldPosition(mp);
-    game.bullets.fire(mp, dir);
+    var dmg = this.effectiveDamage();
+    if (this.cfg.pellets > 1) {
+      game.bullets.fireSpread(mp, dir, this.cfg.pellets, this.spread, dmg, this.cfg.knock);
+    } else {
+      game.bullets.fire(mp, dir, dmg);
+    }
 
     if (this.ammo === 0) this.reload();   // 打空自动换弹
   }
 }
+
+/* ======================= 武器系统（多武器切换 / 解锁 / 波间补给） ======================= */
+class WeaponSystem {
+  constructor(game) {
+    this.game = game;
+    this.list = [];
+    var order = ['pistol', 'rifle', 'shotgun', 'sniper'];
+    for (var i = 0; i < order.length; i++) this.list.push(new Weapon(game, WEAPONS[order[i]]));
+    this.current = this.list[0];
+    this.current.group.visible = true;
+    this.switching = false;
+    this.switchT = 0;
+  }
+  /* 按顺序解锁下一把武器（unlockWave 达标且未解锁）；全部解锁返回 null */
+  unlockNext(wave) {
+    for (var i = 1; i < this.list.length; i++) {
+      var w = this.list[i];
+      if (!w.unlocked && w.unlockWave <= wave) {
+        w.unlocked = true;
+        w.group.visible = false;
+        return w;
+      }
+    }
+    return null;
+  }
+  switchTo(idx) {
+    if (this.switching) return;
+    var w = this.list[idx];
+    if (!w.unlocked) { this.game.showToast('未解锁：' + w.name + '（寻找武器箱）'); return; }
+    if (w === this.current) return;
+    if (this.game.player.stunT > 0) return;   // 被控禁切
+    this.current = w;
+    this.switching = true;
+    this.switchT = w.cfg.switchTime;
+    this.game.weapon = w;
+    for (var i = 0; i < this.list.length; i++) this.list[i].group.visible = (i === idx);
+    w.group.position.y = -0.7;              // 从下方升起
+    w.reloading = false;                    // 切枪打断换弹
+  }
+  cycle(dir) {
+    if (this.switching) return;
+    var idx = this.list.indexOf(this.current);
+    for (var k = 1; k <= 4; k++) {
+      var n = (idx + dir * k + 4) % 4;
+      if (this.list[n].unlocked) { this.switchTo(n); return; }
+    }
+  }
+  update(dt) {
+    if (this.switching) {
+      this.switchT -= dt;
+      var p = 1 - Math.max(0, this.switchT) / this.current.cfg.switchTime;
+      this.current.group.position.y = -0.7 + 0.42 * p;   // 升枪动画
+      if (this.switchT <= 0) {
+        this.switching = false;
+        this.current.group.position.y = -0.28;
+      }
+    }
+  }
+  canFire() { return !this.switching; }
+  /* 波间补给：当前武器补满 + 其他已解锁各 +30%（手枪无限） */
+  supplyWave() {
+    var cur = this.current;
+    if (!cur.cfg.reserveInf) {
+      cur.reserve = Math.min(999, cur.reserve + cur.effectiveMag() * 2);
+      if (cur.ammo === 0 && cur.reserve > 0) cur.reload();
+    }
+    for (var i = 0; i < this.list.length; i++) {
+      var w = this.list[i];
+      if (w === cur || !w.unlocked || w.cfg.reserveInf) continue;
+      w.reserve = Math.min(999, w.reserve + Math.round(w.effectiveMag() * 0.6));
+    }
+  }
+  /* 重新开始：重置解锁与强化 */
+  reset() {
+    for (var i = 0; i < this.list.length; i++) {
+      var w = this.list[i];
+      w.unlocked = !!w.cfg.unlocked;
+      w.dmgMul = 1; w.rateMul = 1; w.magMul = 1; w.spreadMul = 1;
+      w.dmgLv = 0; w.rateLv = 0; w.magLv = 0; w.spreadLv = 0;
+      w.reset();
+      w.group.visible = w.unlocked;
+    }
+    this.current = this.list[0];
+    this.current.group.visible = true;
+    this.switching = false; this.switchT = 0;
+    this.game.weapon = this.current;
+  }
+}
+
 
 /* ======================= 敌人（方块人形 AI：突击兵/疾行者/重装兵/射手） ======================= */
 /* 敌人类型视觉配置：外观在 activate 时应用，数值由 EnemyManager 按波次缩放 */
@@ -958,7 +1214,7 @@ class Enemy {
     this.chargeT = 0; this.chargeVx = 0; this.chargeVz = 0; this.chargeCd = 0;
     this.stunPhaseT = 0;                      // stunned 自晕剩余
     this.tongueCd = 0; this.attackKind = 'orb';
-    this.speedBoostT = 0; this.speedBoost = 1;
+    this.speedMulT = 0; this.speedMul = 1;   // 狂暴加速 1.3 / 闪电减速 0.5
   }
   /** 应用类型外观（体型缩放 + 配色 + 眼部颜色） */
   applyType(type) {
@@ -1013,7 +1269,7 @@ class Enemy {
     this.rockCdMax = cfg.rockCd || 0; this.rockRange = cfg.rockRange || 0;
     this.rockDmg = cfg.rockDmg || 0; this.rockAoe = cfg.rockAoe || 0;
     this.stunPhaseT = 0;
-    this.speedBoostT = 0; this.speedBoost = 1;
+    this.speedMulT = 0; this.speedMul = 1;
     this.setEmissive(0);
   }
   /** 技能首次使用的横幅提示（L4D2 式预警） */
@@ -1030,6 +1286,7 @@ class Enemy {
       注意：部分环境下 Raycaster.far 不可靠，这里手动按距离过滤命中 */
   hasLOS(game, dist) {
     if (dist < 0.0001) return true;
+    if (game.player.invisibleT > 0) return false;   // 幽灵隐身：敌人看不见玩家
     var pos = this.group.position;
     var pp = game.player.pos;
     var eye = new THREE.Vector3(pos.x, 1.5, pos.z);
@@ -1136,7 +1393,7 @@ class Enemy {
           var px = -vz, pz = vx;
           vx += px * j; vz += pz * j;
           var m = Math.hypot(vx, vz) || 1;
-          var spd = this.speed * (this.speedBoostT > 0 ? this.speedBoost : 1);
+          var spd = this.speed * (this.speedMulT > 0 ? this.speedMul : 1);
           vx = vx / m * spd; vz = vz / m * spd;
           pos.x += vx * dt; pos.z += vz * dt;
           this.walkAnim(dt, true);
@@ -1353,7 +1610,7 @@ class Enemy {
           game.rockWarnT = 1.2;                       // 预警圈显示时长（覆盖蓄力+飞行）
         } else {
           // 追击 + 重拳
-          var spd = this.speed * (this.speedBoostT > 0 ? this.speedBoost : 1);
+          var spd = this.speed * (this.speedMulT > 0 ? this.speedMul : 1);
           var vx = dx / dist * spd, vz = dz / dist * spd;
           var j = Math.sin(game.time * 1.2 + this.seed) * 0.25;
           var px = -dz / dist, pz = dx / dist;
@@ -1403,7 +1660,7 @@ class Enemy {
     if (this.pounceCd > 0) this.pounceCd -= dt;
     if (this.chargeCd > 0) this.chargeCd -= dt;
     if (this.tongueCd > 0) this.tongueCd -= dt;
-    if (this.speedBoostT > 0) this.speedBoostT -= dt;
+    if (this.speedMulT > 0) this.speedMulT -= dt;
 
     var pos = this.group.position;
     var pp = game.player.pos;
@@ -1471,7 +1728,7 @@ class Enemy {
         var o = game.enemies.active[bi];
         if (o === this || o.state !== 'active') continue;
         var od = Math.hypot(o.group.position.x - this.group.position.x, o.group.position.z - this.group.position.z);
-        if (od < 15) { o.speedBoost = 1.3; o.speedBoostT = 5; boosted++; }
+        if (od < 15) { o.speedMul = 1.3; o.speedMulT = 5; boosted++; }
       }
     }
     // 坦克击杀：Boss 事件奖励（分数已在 pts 中 + 回满血 + 全弹药）
@@ -1793,6 +2050,7 @@ class EnemyManager {
       this.between = true;
       this.waveDelay = 2.5;                 // 波次间隙
       game.rebuildMap();                    // 每波重建可变地形（种子 = 波次）
+      game.pickups.refreshBetween();         // 刷道具箱 + 武器箱
       // Tank 事件波：第 8 波起每 8 波，清场后触发 Boss 战
       if (this.wave >= 8 && this.wave % 8 === 0) {
         this.tankEventPending = true;
@@ -1901,6 +2159,275 @@ class EnemyManager {
     this.between = false;
   }
 }
+
+/* ======================= 道具配置（马里奥赛车式掉落） ======================= */
+/* fun=true 进道具槽（F 使用）；fun=false 为武器增强（拾取即生效，作用于当前武器） */
+var ITEMS = {
+  heal:     { name: '回血',     icon: '❤', wave: 1, fun: true },
+  ammo:     { name: '弹药补给', icon: '📦', wave: 1, fun: true },
+  boost:    { name: '加速',     icon: '🍄', wave: 3, fun: true },
+  bomb:     { name: '炸弹',     icon: '💣', wave: 3, fun: true },
+  rocket:   { name: '直线火箭', icon: '🐢', wave: 5, fun: true },
+  homing:   { name: '追踪弹',   icon: '🎯', wave: 5, fun: true },
+  storm:    { name: '闪电',     icon: '⚡', wave: 7, fun: true },
+  star:     { name: '星星',     icon: '⭐', wave: 7, fun: true },
+  ghost:    { name: '幽灵',     icon: '👻', wave: 7, fun: true },
+  upDmg:    { name: '伤害强化', icon: '⚡', wave: 1, fun: false, kind: 'dmg' },
+  upMag:    { name: '扩容弹匣', icon: '📦', wave: 1, fun: false, kind: 'mag' },
+  upRate:   { name: '射速强化', icon: '🔧', wave: 3, fun: false, kind: 'rate' },
+  upSpread: { name: '精准强化', icon: '🎯', wave: 3, fun: false, kind: 'spread' }
+};
+
+/* ======================= 道具箱 / 武器箱（拾取管理器） ======================= */
+class PickupManager {
+  constructor(game) {
+    this.game = game;
+    this.boxSlots = [[12, 40], [-12, -40], [36, 16]];       // 道具箱槽位（r≈40 安全区）
+    this.weaponSlots = [[30, 26], [-30, -26]];              // 武器箱槽位
+    this.boxes = [];
+    this.weaponBox = null;
+    var self = this;
+    this.itemTex = makeTex(64, function (g, s) {
+      g.fillStyle = '#ffd94a';
+      g.font = 'bold 46px sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('?', s / 2, s / 2 + 2);
+    });
+    this.wepTex = makeTex(64, function (g, s) {
+      g.fillStyle = '#7dff9a';
+      g.font = 'bold 42px sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('W', s / 2, s / 2 + 2);
+    });
+    for (var i = 0; i < 3; i++) this.boxes.push(this.makeBox(0, 0, this.itemTex));
+    this.weaponBox = this.makeBox(0, 0, this.wepTex);
+  }
+  makeBox(x, z, tex) {
+    var game = this.game;
+    var grp = new THREE.Group();
+    var box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1),
+      new THREE.MeshStandardMaterial({ color: 0x4a3a1e, roughness: 0.7 }));
+    box.position.y = 0.55;
+    box.castShadow = box.receiveShadow = true;
+    grp.add(box);
+    var sign = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+    sign.position.set(0, 0.55, 0.56);
+    grp.add(sign);
+    var pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd94a, transparent: true, opacity: 0.35,
+        blending: THREE.AdditiveBlending, depthWrite: false }));
+    pillar.position.y = 2;
+    grp.add(pillar);
+    grp.position.set(x, 0, z);
+    grp.visible = false;
+    game.scene.add(grp);
+    return { group: grp, active: false, x: x, z: z, t: Math.random() * 10 };
+  }
+  /* 波间刷新：2 道具箱（3 槽随机）+ 1 武器箱 */
+  refreshBetween() {
+    var slots = shuffleArr(this.boxSlots.slice(), mulberry32(Math.floor(Math.random() * 1e9)));
+    var need = 2;
+    for (var i = 0; i < this.boxes.length && need > 0; i++) {
+      if (this.boxes[i].active) continue;
+      var slot = slots[need - 1];
+      this.boxes[i].x = slot[0]; this.boxes[i].z = slot[1];
+      this.boxes[i].group.position.set(slot[0], 0, slot[1]);
+      this.boxes[i].active = true;
+      this.boxes[i].group.visible = true;
+      need--;
+    }
+    var ws = this.weaponSlots[Math.floor(Math.random() * this.weaponSlots.length)];
+    this.weaponBox.x = ws[0]; this.weaponBox.z = ws[1];
+    this.weaponBox.group.position.set(ws[0], 0, ws[1]);
+    this.weaponBox.active = true;
+    this.weaponBox.group.visible = true;
+  }
+  /* 波中补 1 个道具箱（场上 <1 时） */
+  refreshMidWave() {
+    var activeCount = 0;
+    for (var i = 0; i < this.boxes.length; i++) if (this.boxes[i].active) activeCount++;
+    if (activeCount >= 1) return;
+    for (var j = 0; j < this.boxes.length; j++) {
+      if (!this.boxes[j].active) {
+        var slot = this.boxSlots[Math.floor(Math.random() * this.boxSlots.length)];
+        this.boxes[j].x = slot[0]; this.boxes[j].z = slot[1];
+        this.boxes[j].group.position.set(slot[0], 0, slot[1]);
+        this.boxes[j].active = true;
+        this.boxes[j].group.visible = true;
+        return;
+      }
+    }
+  }
+  /* 掉落加权：功能 60% / 增强 40%，按波次过滤 */
+  rollItem(wave) {
+    var funs = [], ups = [];
+    for (var k in ITEMS) {
+      if (ITEMS[k].wave > wave) continue;
+      if (ITEMS[k].fun) funs.push(k); else ups.push(k);
+    }
+    if (Math.random() < 0.6) return funs.length ? funs[Math.floor(Math.random() * funs.length)] : null;
+    return ups.length ? ups[Math.floor(Math.random() * ups.length)] : null;
+  }
+  pickupBox(box) {
+    var g = this.game;
+    var item = this.rollItem(g.enemies.wave || 1);
+    box.active = false;
+    box.group.visible = false;
+    if (!item) return;
+    var cfg = ITEMS[item];
+    if (cfg.fun) {
+      g.player.item = item;
+      g.showToast('拾取道具：' + cfg.icon + ' ' + cfg.name + '（按 F 使用）');
+    } else {
+      g.weapon.upgrade(cfg.kind);
+    }
+    g.particles.burst(new THREE.Vector3(box.x, 1, box.z), 'flash', 8, 2.5, 0.4);
+  }
+  pickupWeaponBox() {
+    var g = this.game;
+    this.weaponBox.active = false;
+    this.weaponBox.group.visible = false;
+    var w = g.weapons.unlockNext(g.enemies.wave || 1);
+    if (w) {
+      // 解锁并装备 + 补满弹药
+      g.showBanner('🔓 解锁 ' + w.name + '！');
+      var idx = g.weapons.list.indexOf(w);
+      g.weapons.switchTo(idx);
+      w.ammo = w.effectiveMag();
+      w.reserve = w.cfg.reserve;
+    } else {
+      var cur = g.weapon;
+      if (!cur.cfg.reserveInf) cur.reserve = Math.min(999, cur.reserve + cur.effectiveMag() * 2);
+      g.showBanner('📦 武器弹药补给');
+    }
+    g.particles.burst(new THREE.Vector3(this.weaponBox.x, 1, this.weaponBox.z), 'flash', 10, 3, 0.45);
+  }
+  update(dt) {
+    var g = this.game;
+    var pp = g.player.pos;
+    for (var i = 0; i < this.boxes.length; i++) {
+      var b = this.boxes[i];
+      if (!b.active) continue;
+      b.t += dt;
+      b.group.rotation.y = Math.sin(b.t * 2) * 0.3;
+      if (Math.hypot(pp.x - b.x, pp.z - b.z) < 1.6) this.pickupBox(b);
+    }
+    if (this.weaponBox && this.weaponBox.active) {
+      var wb = this.weaponBox;
+      wb.t += dt;
+      wb.group.rotation.y = Math.sin(wb.t * 2) * 0.3;
+      if (Math.hypot(pp.x - wb.x, pp.z - wb.z) < 1.6) this.pickupWeaponBox();
+    }
+  }
+  clear() {
+    for (var i = 0; i < this.boxes.length; i++) {
+      this.boxes[i].active = false;
+      this.boxes[i].group.visible = false;
+    }
+    if (this.weaponBox) {
+      this.weaponBox.active = false;
+      this.weaponBox.group.visible = false;
+    }
+  }
+}
+
+/* ======================= 道具弹池（直线火箭 / 追踪弹） ======================= */
+class ItemShotPool {
+  constructor(game) {
+    this.game = game;
+    this.pool = [];
+    this.active = [];
+    var mat = new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false });
+    for (var i = 0; i < 8; i++) {
+      var m = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), mat);
+      m.visible = false;
+      game.scene.add(m);
+      this.pool.push({ mesh: m, pos: new THREE.Vector3(), dir: new THREE.Vector3(), life: 0, active: false, dmg: 60, homing: false });
+    }
+    this.speed = 16;
+  }
+  nearestEnemy() {
+    var best = null, bd = 1e9;
+    var pp = this.game.player.pos;
+    for (var i = 0; i < this.game.enemies.active.length; i++) {
+      var e = this.game.enemies.active[i];
+      if (e.state !== 'active') continue;
+      var d = e.group.position.distanceToSquared(pp);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+  fireLine(pos, dir, dmg) {
+    var b = this.pool.find(x => !x.active) || this.pool[0];
+    b.active = true;
+    b.homing = false;
+    b.pos.copy(pos);
+    b.dir.copy(dir);
+    b.life = 6;
+    b.dmg = dmg || 60;
+    b.mesh.visible = true;
+    b.mesh.position.copy(pos);
+    this.active.push(b);
+  }
+  fireHoming(dmg) {
+    var pp = this.game.player.pos;
+    var target = this.nearestEnemy();
+    var dir = new THREE.Vector3();
+    if (target) dir.copy(target.group.position).sub(pp);
+    else this.game.camera.getWorldDirection(dir);
+    dir.y = 0; dir.normalize();
+    var b = this.pool.find(x => !x.active) || this.pool[0];
+    b.active = true;
+    b.homing = true;
+    b.pos.copy(pp);
+    b.pos.y += 0.6;
+    b.dir.copy(dir);
+    b.life = 6;
+    b.dmg = dmg || 60;
+    b.mesh.visible = true;
+    b.mesh.position.copy(b.pos);
+    this.active.push(b);
+  }
+  update(dt, game) {
+    var seg = this.speed * dt;
+    for (var i = this.active.length - 1; i >= 0; i--) {
+      var b = this.active[i];
+      if (b.homing) {
+        var t = this.nearestEnemy();
+        if (t) {
+          var td = new THREE.Vector3().copy(t.group.position).sub(b.pos);
+          td.y = 0; td.normalize();
+          b.dir.lerp(td, 5 * dt).normalize();
+        }
+      }
+      b.life -= dt;
+      if (b.life <= 0) { this.recycle(b, i); continue; }
+      b.pos.addScaledVector(b.dir, seg);
+      b.mesh.position.copy(b.pos);
+      var hitEnemy = null;
+      for (var j = 0; j < game.enemies.active.length; j++) {
+        var e = game.enemies.active[j];
+        if (e.state !== 'active') continue;
+        if (Math.hypot(e.group.position.x - b.pos.x, e.group.position.z - b.pos.z) < 0.9 + e.bodyRadius) {
+          hitEnemy = e; break;
+        }
+      }
+      if (hitEnemy) {
+        hitEnemy.takeDamage(b.dmg, false, game, b.dir);
+        game.particles.burst(b.pos, 'flash', 8, 3, 0.35);
+        this.recycle(b, i);
+      }
+    }
+  }
+  recycle(b, i) { b.active = false; b.mesh.visible = false; this.active.splice(i, 1); }
+  resetAll() {
+    this.active.length = 0;
+    for (var i = 0; i < this.pool.length; i++) { this.pool[i].active = false; this.pool[i].mesh.visible = false; }
+  }
+}
+
 
 /* ======================= 地图（竞技场 + 掩体 + 光照） ======================= */
 /* ======================= 地图（每波程序化生成：常驻骨架 + 可变地形） ======================= */
@@ -2510,6 +3037,10 @@ class Player {
     this.healAcc = 0;          // 回血累计（触发 +6 浮动提示）
     this.healFx = 0;           // 回血浮动提示显示计时
     this.god = false;          // 调试：无敌模式
+    this.item = null;            // 当前持有道具（功能道具，F 使用）
+    this.speedMul = 1; this.speedMulT = 0;   // 加速/星星
+    this.invulnItemT = 0;        // 星星无敌
+    this.invisibleT = 0;         // 幽灵隐身
     this.stunType = null;      // 受控状态：'runner' 扑击压制 / 'shooter' 舌头束缚 / 'brute' 冲锋硬直
     this.stunT = 0;            // 受控剩余时间
     this.stunFrom = null;      // 受控来源敌人（射击其本体可挣脱）
@@ -2537,6 +3068,8 @@ class Player {
     this.landDip = 0; this.healAcc = 0; this.healFx = 0;
     this.stunType = null; this.stunT = 0; this.stunFrom = null;
     this.stunBreakAcc = 0; this.stunProtectT = 0; this.slowT = 0;
+    this.item = null;
+    this.speedMul = 1; this.speedMulT = 0; this.invulnItemT = 0; this.invisibleT = 0;
     this._wasOnGround = true;
   }
   /* 进入受控状态（被压制/束缚/硬直），已有受控或保护期内忽略 */
@@ -2556,6 +3089,55 @@ class Player {
     this.stunBreakAcc = 0;
     this.stunProtectT = 0.5;
   }
+  /* 使用道具（F 键）：功能道具即时生效 */
+  useItem() {
+    var game = this.game;
+    if (!this.item) return;
+    var it = this.item;
+    this.item = null;
+    var w = game.weapon;
+    switch (it) {
+      case 'heal':
+        this.hp = Math.min(100, this.hp + 40);
+        game.showBanner('❤ 回血 +40');
+        break;
+      case 'ammo':
+        if (!w.cfg.reserveInf) w.reserve = Math.min(999, w.reserve + w.effectiveMag() * 3);
+        game.showBanner('📦 弹药补给');
+        break;
+      case 'boost':
+        this.speedMul = 1.5; this.speedMulT = 3;
+        game.showBanner('🍄 加速！');
+        break;
+      case 'bomb':
+        game.itemBomb();
+        break;
+      case 'rocket': {
+        var dir = new THREE.Vector3();
+        game.camera.getWorldDirection(dir);
+        dir.y = 0; dir.normalize();
+        game.itemShots.fireLine(new THREE.Vector3(this.pos.x, 1.5, this.pos.z), dir, 60);
+        game.showBanner('🐢 直线火箭！');
+        break;
+      }
+      case 'homing':
+        game.itemShots.fireHoming(60);
+        game.showBanner('🎯 追踪弹！');
+        break;
+      case 'storm':
+        game.itemStorm();
+        break;
+      case 'star':
+        this.invulnItemT = 5;
+        this.speedMul = 1.2; this.speedMulT = 5;
+        game.showBanner('⭐ 星星无敌！');
+        break;
+      case 'ghost':
+        this.invisibleT = 4;
+        game.showBanner('👻 隐身！');
+        break;
+    }
+  }
   /* 射击来源敌人本体时调用（takeDamage 挂钩） */
   stunBreakByEnemy(en) {
     if (this.stunT > 0 && this.stunFrom === en) this.releaseStun();
@@ -2568,6 +3150,9 @@ class Player {
     if (this.stunT > 0) this.stunT -= dt;
     if (this.stunProtectT > 0) this.stunProtectT -= dt;
     if (this.slowT > 0) this.slowT -= dt;
+    if (this.speedMulT > 0) this.speedMulT -= dt;
+    if (this.invulnItemT > 0) this.invulnItemT -= dt;
+    if (this.invisibleT > 0) this.invisibleT -= dt;
     if (this.stunT <= 0 && this.stunType !== null) {   // 受控时间自然结束
       this.stunType = null; this.stunFrom = null; this.stunBreakAcc = 0;
       this.stunProtectT = 0.5;
@@ -2625,7 +3210,9 @@ class Player {
     var speed = this.sprinting ? PlayerConfig.SPRINT
       : (this.crouching ? PlayerConfig.CROUCH : PlayerConfig.WALK);
     if (game.weapon.aimFrac > 0.5) speed *= PlayerConfig.AIM_MOVE_MULT;
+    speed *= game.weapon.cfg.moveMul;   // 武器移速系数（霰弹 0.9 / 狙击 0.85）
     if (this.slowT > 0) speed *= 0.8;
+    if (this.speedMulT > 0) speed *= this.speedMul;   // 加速/星星
     var sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     // 摄像机朝向：yaw=0 时看向 -Z
     var wx = -sin * f + cos * r;
@@ -2722,6 +3309,7 @@ class Player {
     if (game.state !== 'playing') return;
     if (this.invulnT > 0) return;              // 受击无敌帧
     if (this.god) return;                      // 调试无敌
+    if (this.invulnItemT > 0) return;          // 星星无敌
     this.hp -= dmg;
     this.dmgTimer = 0;
     this.invulnT = 0.4;
@@ -2799,8 +3387,12 @@ class Game {
     // 模块
     this.map = new MapBuilder(this);
     this.player = new Player(this);
-    this.weapon = new Weapon(this);
+    this.weapons = new WeaponSystem(this);   // 多武器系统（4 把，手枪开局，其余武器箱解锁）
+    this.weapon = this.weapons.current;      // 始终指向当前武器（兼容现有调用）
     this.bullets = new BulletPool(this);
+    this.itemShots = new ItemShotPool(this);   // 道具弹（直线/追踪）
+    this.pickups = new PickupManager(this);   // 道具箱/武器箱
+    this.lastMidPickupT = 0;
     this.particles = new ParticlePool(this);
     this.shots = new EnemyShotPool(this);   // 敌人弹幕（射手光球），须先于 EnemyManager
     this.enemies = new EnemyManager(this);
@@ -2844,6 +3436,12 @@ class Game {
     this.stunProg = document.getElementById('stunProg');
     this.boogerOverlay = document.getElementById('boogerOverlay');
     this.bossBarWrap = document.getElementById('bossBarWrap');
+    this.wslotEls = [
+      document.getElementById('wslot0'), document.getElementById('wslot1'),
+      document.getElementById('wslot2'), document.getElementById('wslot3')
+    ];
+    this.itemSlot = document.getElementById('itemSlot');
+    this.scopeOverlay = document.getElementById('scopeOverlay');
     this.bossBar = document.getElementById('bossBar');
 
     // L4D2 融合状态：胆汁糊屏 / 坦克投石预警圈
@@ -2981,6 +3579,11 @@ class Game {
       if (e.repeat) { self.input.keys.add(e.code); return; }
       self.input.press(e.code);
       if (e.code === 'KeyR' && self.state === 'playing') self.weapon.reload();
+      if (e.code === 'Digit1') self.weapons.switchTo(0);
+      else if (e.code === 'Digit2') self.weapons.switchTo(1);
+      else if (e.code === 'Digit3') self.weapons.switchTo(2);
+      else if (e.code === 'Digit4') self.weapons.switchTo(3);
+      if (e.code === 'KeyF' && self.state === 'playing') self.player.useItem();
       if (e.code === 'KeyM') self.audio.toggleMute();
     });
     document.addEventListener('keyup', function (e) { self.input.release(e.code); });
@@ -3027,6 +3630,11 @@ class Game {
     });
     // 灵敏度调节（暂停界面）
     self.sensMinus.addEventListener('click', function () { self.changeSens(-1); });
+    // 滚轮切换武器
+    window.addEventListener('wheel', function (e) {
+      if (self.state !== 'playing' || document.pointerLockElement !== self.canvas) return;
+      self.weapons.cycle(e.deltaY > 0 ? 1 : -1);
+    }, { passive: true });
     self.sensPlus.addEventListener('click', function () { self.changeSens(1); });
   }
 
@@ -3041,7 +3649,11 @@ class Game {
   /* ---------- 开始 / 重新开始 ---------- */
   startGame() {
     this.player.reset();
-    this.weapon.reset();
+    this.weapons.reset();
+    this.pickups.clear();
+    this.itemShots.resetAll();
+    this.player.item = null;
+    this.lastMidPickupT = 0;
     this.enemies.reset();
     this.bullets.resetAll();
     this.particles.resetAll();
@@ -3090,6 +3702,36 @@ class Game {
     for (var i = 0; i < act.length; i++) bt.push(act[i].body, act[i].head);
     this.bulletTargets = bt;
     this.showToast('地形已更新');
+  }
+
+  /* 道具：炸弹（半径 5m AoE） */
+  itemBomb() {
+    var pp = this.player.pos;
+    this.particles.burst(new THREE.Vector3(pp.x, 1, pp.z), 'flash', 16, 4, 0.5);
+    this.shake = Math.max(this.shake, 0.5);
+    var n = 0;
+    for (var i = 0; i < this.enemies.active.length; i++) {
+      var e = this.enemies.active[i];
+      if (e.state !== 'active') continue;
+      if (Math.hypot(e.group.position.x - pp.x, e.group.position.z - pp.z) < 5) {
+        e.takeDamage(80, false, this, null);
+        n++;
+      }
+    }
+    this.showBanner('💣 爆炸！命中 ' + n + ' 只敌人');
+  }
+  /* 道具：闪电（全场敌人受伤 + 减速） */
+  itemStorm() {
+    var n = 0;
+    for (var i = 0; i < this.enemies.active.length; i++) {
+      var e = this.enemies.active[i];
+      if (e.state !== 'active') continue;
+      e.takeDamage(50, false, this, null);
+      e.speedMul = 0.5; e.speedMulT = 4;
+      n++;
+    }
+    this.showBanner('⚡ 闪电！命中 ' + n + ' 只敌人');
+    this.shake = Math.max(this.shake, 0.3);
   }
 
   gameOver() {
@@ -3142,10 +3784,17 @@ class Game {
         var dt = this.dt;
         this.player.update(dt, this);
         this.weapon.update(dt, this);
+        this.weapons.update(dt);
         this.bullets.update(dt, this);
         this.enemies.update(dt, this);
         this.shots.update(dt, this);
         this.particles.update(dt);
+        this.pickups.update(dt);
+        this.itemShots.update(dt, this);
+        if (this.time - this.lastMidPickupT > 20) {
+          this.lastMidPickupT = this.time;
+          this.pickups.refreshMidWave();
+        }
 
         // 相机：视角 = yaw/pitch + 后坐力；镜头抖动
         var cam = this.camera;
@@ -3178,7 +3827,7 @@ class Game {
         if (pl.landDip > 0) cam.position.y -= pl.landDip;
         // FOV：瞄准 55 / 冲刺 84 / 默认 75
         var targetFov = 75;
-        if (this.weapon.aimFrac > 0.5) targetFov = 55;
+        if (this.weapon.aimFrac > 0.5) targetFov = this.weapon.cfg.aimFov;
         else if (pl.sprinting) targetFov = 84;
         if (Math.abs(cam.fov - targetFov) > 0.05) {
           cam.fov += (targetFov - cam.fov) * (1 - Math.exp(-10 * dt));
@@ -3234,7 +3883,7 @@ class Game {
       this.ammoText.textContent = '换弹中…';
       this.ammoText.classList.add('reloading');
     } else {
-      this.ammoText.textContent = w.ammo + ' / ' + w.reserve;
+      this.ammoText.textContent = w.cfg.reserveInf ? w.ammo + ' / ∞' : w.ammo + ' / ' + w.reserve;
       this.ammoText.classList.remove('reloading');
     }
     this.scoreText.textContent = this.score;
@@ -3274,6 +3923,40 @@ class Game {
       this.bossBarWrap.classList.add('show');
       this.bossBar.style.width = Math.max(0, this.tankActive.hp / this.tankActive.maxHp * 100).toFixed(1) + '%';
     } else this.bossBarWrap.classList.remove('show');
+    // 武器栏（解锁/弹药/强化等级/当前高亮）
+    var ws = this.weapons.list;
+    for (var wi = 0; wi < ws.length; wi++) {
+      var wd = ws[wi];
+      var el = this.wslotEls[wi];
+      if (wd.unlocked) {
+        el.classList.remove('locked');
+        el.querySelector('.wammo').textContent = wd.cfg.reserveInf ? wd.ammo + '/∞' : wd.ammo + '/' + wd.reserve;
+        var upTxt = '';
+        if (wd.dmgLv) upTxt += '⚡'.repeat(wd.dmgLv);
+        if (wd.rateLv) upTxt += '🔧'.repeat(wd.rateLv);
+        if (wd.magLv) upTxt += '📦'.repeat(wd.magLv);
+        if (wd.spreadLv) upTxt += '🎯'.repeat(wd.spreadLv);
+        el.querySelector('.wup').textContent = upTxt;
+      } else {
+        el.classList.add('locked');
+        el.querySelector('.wammo').textContent = '🔒';
+        el.querySelector('.wup').textContent = '';
+      }
+      el.classList.toggle('cur', wd === this.weapon);
+    }
+    // 道具槽
+    if (p.item) {
+      var ic = ITEMS[p.item];
+      this.itemSlot.classList.remove('empty');
+      this.itemSlot.querySelector('.is-name').textContent = ic ? ic.icon + ' ' + ic.name : '—';
+    } else {
+      this.itemSlot.classList.add('empty');
+      this.itemSlot.querySelector('.is-name').textContent = '—';
+    }
+    // 狙击镜
+    var scoped = this.weapon.cfg.aimFov < 40 && this.weapon.aimFrac > 0.5;
+    this.scopeOverlay.classList.toggle('show', scoped);
+    document.body.classList.toggle('scoped', scoped);
     // 准星扩散
     var px = 6 + w.spread * 1150 + (w.reloading ? 8 : 0);
     document.documentElement.style.setProperty('--spread', px.toFixed(1) + 'px');
