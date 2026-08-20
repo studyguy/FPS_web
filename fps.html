@@ -251,7 +251,7 @@
 <div id="hitFlash"></div>
 <div id="dmgDir"><div class="arc"></div></div>
 <div id="boogerOverlay"></div>
-<div id="stunBar">连按 空格 挣脱！<span class="sb-prog"><i id="stunProg"></i></span></div>
+<div id="stunBar"><span id="stunTxt">连按 空格 挣脱！</span><span class="sb-prog"><i id="stunProg"></i></span></div>
 <div id="bossBarWrap"><div class="boss-lbl">⚠ 坦克</div><div class="boss-bg"><div id="bossBar"></div></div></div>
 <div id="scopeOverlay"><div class="scope-line sl1"></div><div class="scope-line sl2"></div></div>
 <div id="dmgNumLayer"></div>
@@ -1966,13 +1966,19 @@ class EnemyManager {
       hp: shooter.tongueHp,
       shooter: shooter,
       pulled: 0,
-      mesh: new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, Math.max(0.4, dist)),
+      len: Math.max(0.4, dist),
+      progress: 0,          // 伸出动画 0→1（0.22s 从射手头部伸向玩家）
+      mesh: new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1),
         new THREE.MeshBasicMaterial({ color: 0x5aff7a })),
+      tip: new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0x8dffab })),
       active: true
     };
     t.mesh.userData.tongue = t;
     t.mesh.visible = true;
+    t.tip.visible = true;
     game.scene.add(t.mesh);
+    game.scene.add(t.tip);
     game.bulletTargets.push(t.mesh);
     this.tongues.push(t);
     return t;
@@ -1993,8 +1999,16 @@ class EnemyManager {
       var mx = from.x + (pp.x - from.x) * 0.72;
       var mz = from.z + (pp.z - from.z) * 0.72;
       var my = 1.5 + (eyeY - 1.5) * 0.72;
+      // 伸出动画：从短到长（玩家能看清"一条绿色舌头伸向自己"）
+      t.progress = Math.min(1, t.progress + dt / 0.22);
+      t.mesh.scale.z = t.len * t.progress;
       t.mesh.position.set(mx, my, mz);
       t.mesh.lookAt(pp.x, eyeY, pp.z);
+      // 舌尖光球（玩家端）
+      var tx = pp.x - from.x, tz = pp.z - from.z;
+      var td = Math.hypot(tx, tz) || 1;
+      var halfLen = t.mesh.scale.z * 0.5;
+      t.tip.position.set(mx + tx / td * halfLen, my + (eyeY - 1.5) / td * halfLen, mz + tz / td * halfLen);
       // 拉拽：束缚期间把玩家拉向射手（拉满 tonguePull 距离）
       if (game.player.stunT > 0 && game.player.stunFrom === s && t.pulled < s.tonguePull) {
         var dx = from.x - pp.x, dz = from.z - pp.z;
@@ -2014,6 +2028,7 @@ class EnemyManager {
     this.tongues.splice(idx, 1);
     t.active = false;
     t.mesh.visible = false;
+    t.tip.visible = false;
     var bt = this.game.bulletTargets;
     var bi = bt.indexOf(t.mesh);
     if (bi >= 0) bt.splice(bi, 1);
@@ -3278,7 +3293,7 @@ class Player {
         game.showBanner('🍄 加速！');
         break;
       case 'bomb':
-        game.itemBomb();
+        game.throwBomb();
         break;
       case 'rocket': {
         var dir = new THREE.Vector3();
@@ -3603,6 +3618,7 @@ class Game {
     this.sensPlus = document.getElementById('sensPlus');
     this.stunBar = document.getElementById('stunBar');
     this.stunProg = document.getElementById('stunProg');
+    this.stunTxt = document.getElementById('stunTxt');
     this.boogerOverlay = document.getElementById('boogerOverlay');
     this.bossBarWrap = document.getElementById('bossBarWrap');
     this.wslotEls = [
@@ -3621,6 +3637,14 @@ class Game {
     this.rockWarnMesh.rotation.x = -Math.PI / 2;
     this.rockWarnMesh.visible = false;
     this.scene.add(this.rockWarnMesh);
+
+    // 炸弹投掷（抛物线 + 落点预警）
+    this.bombProj = null;
+    this.bombWarnMesh = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.7, 24),
+      new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+    this.bombWarnMesh.rotation.x = -Math.PI / 2;
+    this.bombWarnMesh.visible = false;
+    this.scene.add(this.bombWarnMesh);
 
     // 鼠标灵敏度（localStorage 持久化，隐私模式降级为默认值；旧值吸附到 0.2 档位网格）
     this.sens = PlayerConfig.SENS_DEFAULT;
@@ -3851,6 +3875,8 @@ class Game {
     this.boogerFx = 0;
     this.rockWarnT = 0;
     this.rockWarnMesh.visible = false;
+    this.bombProj = null;
+    this.bombWarnMesh.visible = false;
     this.state = 'playing';
     this.startScreen.classList.add('hidden');
     this.gameoverScreen.classList.add('hidden');
@@ -3889,15 +3915,60 @@ class Game {
   }
 
   /* 道具：炸弹（半径 5m AoE） */
-  itemBomb() {
+  /* 投掷炸弹：抛物线飞向准星方向 8m 处，落地预警后爆炸 */
+  throwBomb() {
     var pp = this.player.pos;
-    this.particles.burst(new THREE.Vector3(pp.x, 1, pp.z), 'flash', 16, 4, 0.5);
+    var dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    dir.y = 0; dir.normalize();
+    var to = new THREE.Vector3(pp.x + dir.x * 8, 0, pp.z + dir.z * 8);
+    var mesh = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0x2e3326 }));
+    this.scene.add(mesh);
+    this.bombProj = {
+      mesh: mesh,
+      from: new THREE.Vector3(pp.x, 1.6, pp.z),
+      to: to,
+      t: 0, dur: 0.55, armed: 0
+    };
+    this.showToast('💣 炸弹投出…');
+  }
+  updateBomb(dt) {
+    var b = this.bombProj;
+    if (!b) return;
+    b.t += dt;
+    if (b.t < b.dur) {
+      // 抛物线飞行
+      var p = b.t / b.dur;
+      b.mesh.position.set(
+        b.from.x + (b.to.x - b.from.x) * p,
+        b.from.y + (b.to.y - b.from.y) * p + Math.sin(p * Math.PI) * 1.8,
+        b.from.z + (b.to.z - b.from.z) * p);
+    } else {
+      // 落地 → 红圈预警 0.35s → 爆炸
+      b.mesh.position.set(b.to.x, 0.15, b.to.z);
+      b.armed += dt;
+      this.bombWarnMesh.position.set(b.to.x, 0.06, b.to.z);
+      this.bombWarnMesh.visible = true;
+      if (b.armed > 0.35) {
+        this.bombWarnMesh.visible = false;
+        this.scene.remove(b.mesh);
+        b.mesh.geometry.dispose();
+        this.bombProj = null;
+        this.itemBomb(b.to.x, b.to.z);
+      }
+    }
+  }
+  /* 炸弹爆炸（以落点为中心，半径 5m） */
+  itemBomb(bx, bz) {
+    if (bx === undefined) { bx = this.player.pos.x; bz = this.player.pos.z; }
+    this.particles.burst(new THREE.Vector3(bx, 1, bz), 'flash', 16, 4, 0.5);
     this.shake = Math.max(this.shake, 0.5);
     var n = 0;
     for (var i = 0; i < this.enemies.active.length; i++) {
       var e = this.enemies.active[i];
       if (e.state !== 'active') continue;
-      if (Math.hypot(e.group.position.x - pp.x, e.group.position.z - pp.z) < 5) {
+      if (Math.hypot(e.group.position.x - bx, e.group.position.z - bz) < 5) {
         e.takeDamage(80, false, this, null);
         this.dmgNumbers.show(e.group.position, '80', false);
         n++;
@@ -3977,6 +4048,7 @@ class Game {
         this.particles.update(dt);
         this.pickups.update(dt);
         this.dmgNumbers.update(dt);
+        this.updateBomb(dt);
         this.itemShots.update(dt, this);
         if (this.time - this.lastMidPickupT > 20) {
           this.lastMidPickupT = this.time;
@@ -4101,6 +4173,9 @@ class Game {
     // 被控挣脱提示条（连按空格 / 射击来源挣脱）
     if (p.stunT > 0 && p.stunType !== 'brute') {
       this.stunBar.classList.add('show');
+      this.stunTxt.textContent = p.stunType === 'shooter'
+        ? '被舌头缠住！射击绿色舌头或射手本体挣脱'
+        : '连按 空格 挣脱！';
       this.stunProg.style.width = Math.min(100, p.stunBreakAcc / 3 * 100).toFixed(0) + '%';
     } else this.stunBar.classList.remove('show');
     // 胆汁糊屏
